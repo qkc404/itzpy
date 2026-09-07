@@ -28,9 +28,11 @@ echo -e "  ${MAGENTA}MADE BY SAEKA TOJIRP${RESET}"
 echo -e "  ${GREEN}fb.com/saekacutiee${RESET}"
 echo ""
 
-PROJECT_ID=$(gcloud config get-value project 2>/dev/null | tr -d '[:space:]')
-if [ -z "$PROJECT_ID" ]; then
-    echo -e "  ${RED}ERROR: No active GCP project detected. Please run 'gcloud init'.${RESET}"
+# Auto-detect from Cloud Shell env variable first, fallback to gcloud config
+PROJECT_ID="${DEVSHELL_PROJECT_ID:-$(gcloud config get-value project 2>/dev/null | tr -d '[:space:]')}"
+
+if [ -z "$PROJECT_ID" ] || [ "$PROJECT_ID" = "(unset)" ]; then
+    echo -e "  ${RED}ERROR: No active GCP project detected. Please run 'gcloud config set project <PROJECT_ID>'.${RESET}"
     exit 1
 fi
 echo -e "  ${CYAN}PROJECT: ${GREEN}${PROJECT_ID}${RESET}"
