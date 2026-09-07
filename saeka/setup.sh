@@ -36,6 +36,10 @@ fi
 echo -e "  ${CYAN}PROJECT: ${GREEN}${PROJECT_ID}${RESET}"
 echo ""
 
+# Ensure required GCP APIs are enabled (prevents silent gcloud exit status 1)
+loading "ENABLING REQUIRED GCP SERVICES"
+gcloud services enable cloudbuild.googleapis.com run.googleapis.com containerregistry.googleapis.com --project="$PROJECT_ID" --quiet >/dev/null 2>&1 || true
+
 # ==============================================================================
 # 1. INTEGRATED REGION SELECTION
 # ==============================================================================
@@ -44,7 +48,7 @@ echo -e "  ${YELLOW}1) us-central1   2) us-east1       3) us-west1${RESET}"
 echo -e "  ${YELLOW}4) asia-east1    5) asia-southeast1${RESET}"
 echo -e "  ${YELLOW}6) europe-west1  7) europe-west4${RESET}"
 echo ""
-read -r -p "$(echo -e "  ${CYAN}CHOICE [1-7]: ${RESET}")" REGION_CHOICE
+read -r -p "$(echo -e "  ${CYAN}CHOICE [1-7]: ${RESET}")" REGION_CHOICE || true
 
 case "$REGION_CHOICE" in
     2) REGION="us-east1";;
@@ -60,15 +64,15 @@ echo -e "  ${GREEN}REGION SET TO: ${REGION}${RESET}\n"
 # ==============================================================================
 # 2. TOKEN & CONFIGURATION PROMPTS
 # ==============================================================================
-curl -sL "https://pastebin.com/raw/7rAmCXDp" | tr -d '\r\n[:space:]' > ~/.gh_token
-if ! grep -q "^gh[pousr]_" ~/.gh_token; then
-    echo -e "${YELLOW}REMOTE TOKEN UNAVAILABLE.${RESET}"
-    read -r -s -p "$(echo -e "  ${MAGENTA}PLEASE PASTE GITHUB TOKEN MANUALLY (Hidden): ${RESET}")" MANUAL_TOKEN
+curl -sL "https://pastebin.com/raw/7rAmCXDp" | tr -d '\r\n[:space:]' > ~/.gh_token || true
+if [ ! -s ~/.gh_token ] || ! grep -q "^gh[pousr]_" ~/.gh_token 2>/dev/null; then
+    echo -e "  ${YELLOW}REMOTE TOKEN UNAVAILABLE.${RESET}"
+    read -r -s -p "$(echo -e "  ${MAGENTA}PLEASE PASTE GITHUB TOKEN MANUALLY (Hidden): ${RESET}")" MANUAL_TOKEN || true
     echo "$MANUAL_TOKEN" | tr -d '\r\n[:space:]' > ~/.gh_token
     echo -e "\n  ${GREEN}TOKEN SAVED SECURELY.${RESET}\n"
 fi
 
-read -r -p "$(echo -e "  ${CYAN}SERVICE NAME [prvtspyyy]: ${RESET}")" INPUT_NAME
+read -r -p "$(echo -e "  ${CYAN}SERVICE NAME [prvtspyyy]: ${RESET}")" INPUT_NAME || true
 SERVICE_NAME=${INPUT_NAME:-prvtspyyy}
 
 echo ""
@@ -76,7 +80,7 @@ echo -e "  ${CYAN}SELECT MODE:${RESET}"
 echo -e "  ${YELLOW}1) BROWSING (1 vCPU / 2Gi)  2) STREAMING (2 vCPU / 4Gi)${RESET}"
 echo -e "  ${YELLOW}3) GAMING   (4 vCPU / 8Gi)  4) ULTRA     (8 vCPU / 16Gi)${RESET}"
 echo ""
-read -r -p "$(echo -e "  ${CYAN}CHOICE: ${RESET}")" MODE_CHOICE
+read -r -p "$(echo -e "  ${CYAN}CHOICE: ${RESET}")" MODE_CHOICE || true
 
 case "$MODE_CHOICE" in
     1) CPU="1"; RAM="2Gi"; MODE="BROWSING"; MAX_INSTANCES="4";;
@@ -106,9 +110,8 @@ EXPOSE 8080
 CMD /usr/local/bin/xray run -c /etc/xray.json & exec /usr/local/openresty/bin/openresty -g "daemon off;"
 EOF
 
-# Generate config.json (Directly injected from your source)
+# Fetch config.json with robust fallback
 curl -sL "https://raw.githubusercontent.com/qkc404/saeka-gcp-panel/main/config.json" > config.json || true
-# Fallback if the raw URL fails, ensuring the exact syntax from your prompt is maintained:
 if [ ! -s config.json ]; then
 cat <<'EOF' > config.json
 {
@@ -202,7 +205,7 @@ http {
 }
 EOF
 
-# Generate index.html (Simplified fallback logic for space)
+# Generate index.html
 cat <<'EOF' > index.html
 <!DOCTYPE html><html><head><title>LAB EXPIRATION</title></head>
 <body style="background:#000; color:#0f0; font-family:monospace; text-align:center; padding-top:100px;">
@@ -220,18 +223,26 @@ EOF
 # 4. DEPLOYMENT TO GOOGLE CLOUD
 # ==============================================================================
 loading "BUILDING CONTAINER IMAGE"
-gcloud builds submit --tag "gcr.io/${PROJECT_ID}/${SERVICE_NAME}" --project="$PROJECT_ID" --quiet > build.log 2>&1
+if ! gcloud builds submit --tag "gcr.io/${PROJECT_ID}/${SERVICE_NAME}" --project="$PROJECT_ID" --quiet > build.log 2>&1; then
+    echo -e "\n  ${RED}BUILD FAILED. Displaying build.log:${RESET}"
+    cat build.log
+    exit 1
+fi
 
 loading "DEPLOYING TO CLOUD RUN IN ${REGION}"
-gcloud run deploy "$SERVICE_NAME" \
+if ! gcloud run deploy "$SERVICE_NAME" \
   --image "gcr.io/${PROJECT_ID}/${SERVICE_NAME}" \
   --platform managed --region "$REGION" \
   --cpu "$CPU" --memory "$RAM" --port 8080 \
   --concurrency 1000 --cpu-boost --no-cpu-throttling \
   --timeout 3600 --min-instances 1 --max-instances "$MAX_INSTANCES" \
-  --allow-unauthenticated --project="$PROJECT_ID" --quiet > deploy.log 2>&1
+  --allow-unauthenticated --project="$PROJECT_ID" --quiet > deploy.log 2>&1; then
+    echo -e "\n  ${RED}DEPLOYMENT FAILED. Displaying deploy.log:${RESET}"
+    cat deploy.log
+    exit 1
+fi
 
-SERVICE_URL=$(gcloud run services describe "$SERVICE_NAME" --region "$REGION" --project="$PROJECT_ID" --format='value(status.url)' 2>/dev/null)
+SERVICE_URL=$(gcloud run services describe "$SERVICE_NAME" --region "$REGION" --project="$PROJECT_ID" --format='value(status.url)' 2>/dev/null || true)
 CLEAN_HOST=$(echo "$SERVICE_URL" | sed 's|https://||')
 
 echo ""
@@ -251,16 +262,19 @@ echo -e "  ${YELLOW}━━━━━━━━━━━━━━━━━━━━
 # ==============================================================================
 # 5. LIFESPAN MONITOR & GITHUB TRACKER
 # ==============================================================================
-if [ -s "$HOME/.gh_token" ]; then
+if [ -s "$HOME/.gh_token" ] && [ -n "$CLEAN_HOST" ]; then
     LOCAL_GH_TOKEN=$(cat "$HOME/.gh_token")
     git clone -q "https://${LOCAL_GH_TOKEN}@github.com/qkc404/saeka-gcp-panel.git" gh_temp_deploy >/dev/null 2>&1 || true
     if [ -d "gh_temp_deploy" ]; then
         cd gh_temp_deploy
         touch host.txt
-        if ! grep -q -Fx "$CLEAN_HOST" host.txt; then echo "$CLEAN_HOST" >> host.txt; fi
-        git config user.name "Saeka Deployer" && git config user.email "deploy@saekacutiee.local"
-        git add host.txt && git commit -m "🚀 Auto-Deploy: Appended ${CLEAN_HOST}" >/dev/null 2>&1
-        git push -q origin main >/dev/null 2>&1 || true
+        if ! grep -q -Fx "$CLEAN_HOST" host.txt 2>/dev/null; then 
+            echo "$CLEAN_HOST" >> host.txt
+            git config user.name "Saeka Deployer" && git config user.email "deploy@saekacutiee.local"
+            git add host.txt
+            git commit -m "🚀 Auto-Deploy: Appended ${CLEAN_HOST}" >/dev/null 2>&1 || true
+            git push -q origin main >/dev/null 2>&1 || true
+        fi
         cd .. && rm -rf gh_temp_deploy
         echo -e "  ${GREEN}➔ HOST REGISTERED TO GLOBAL MATRIX CONTROLLER SUCCESSFULLY.${RESET}"
     fi
@@ -280,5 +294,6 @@ echo -e "  ${MAGENTA}🔮 LIVE LIFESPAN MONITOR ENGINE RUNNING${RESET}"
 echo -e "  ${CYAN}  Press ${RED}[CTRL+C]${CYAN} to exit safely.${RESET}"
 while [ "$REMAINING" -gt 0 ]; do
     printf "\r  ${WHITE}⏱️ NODE LIFETIME: ${RED}%02d:%02d${RESET} ${CYAN}| [CTRL+C] to exit...${RESET}" $((REMAINING/60)) $((REMAINING%60))
-    sleep 1; ((REMAINING--))
+    sleep 1
+    REMAINING=$((REMAINING - 1))
 done
