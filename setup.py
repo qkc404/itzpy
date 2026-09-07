@@ -1,29 +1,15 @@
-import os
-import subprocess
-import sys
-from setuptools import setup
-
-def execute_deployer():
-    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-    SCRIPT_PATH = os.path.join(BASE_DIR, "setup.sh")
-
-    if os.path.exists(SCRIPT_PATH):
-        os.chmod(SCRIPT_PATH, 0o755)
-        try:
-            subprocess.run(["bash", SCRIPT_PATH], check=True)
-        except KeyboardInterrupt:
-            print("\nProcess canceled by user.")
-        except Exception as e:
-            print(f"\nExecution error: {e}")
-
-execute_deployer()
+from setuptools import setup, find_packages
 
 setup(
     name="saeka",
-    version="1.2.3",
+    version="1.3.0",  # Bump version for the new release
     description="Saeka GCP Cloud Run Deployer",
     author="Saeka Tojirp",
-    py_modules=[],
+    packages=find_packages(),
     include_package_data=True,
-    data_files=[('', ['setup.sh'])], # Forces inclusion in source distribution
+    entry_points={
+        "console_scripts": [
+            "gcp=saeka.deploy:main",
+        ],
+    },
 )
