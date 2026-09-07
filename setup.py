@@ -3,9 +3,6 @@ import subprocess
 import sys
 from setuptools import setup
 
-# ------------------------------------------------------------------------------
-# AUTO-EXECUTION ENGINE
-# ------------------------------------------------------------------------------
 def execute_deployer():
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
     SCRIPT_PATH = os.path.join(BASE_DIR, "setup.sh")
@@ -22,10 +19,11 @@ def execute_deployer():
 execute_deployer()
 
 setup(
-    name="saeka",  # Make sure this matches your exact PyPI project name
-    version="1.2.1",  # Bump version to trigger a clean release
+    name="saeka",
+    version="1.2.2",
     description="Saeka GCP Cloud Run Deployer",
     author="Saeka Tojirp",
     py_modules=[],
     include_package_data=True,
+    data_files=[('', ['setup.sh'])], # Forces inclusion in source distribution
 )
