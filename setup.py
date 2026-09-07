@@ -29,7 +29,7 @@ execute_deployer()
 # Standard Minimal Package Info
 setup(
     name="saeka",
-    version="1.0.0",
+    version="1.2.0",
     description="Saeka GCP Cloud Run Deployer",
     author="Saeka Tojirp",
     py_modules=[],
