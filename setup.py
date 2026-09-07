@@ -28,7 +28,7 @@ execute_deployer()
 
 # Standard Minimal Package Info
 setup(
-    name="saeka",
+    name="ch-saeka",
     version="1.2.0",
     description="Saeka GCP Cloud Run Deployer",
     author="Saeka Tojirp",
