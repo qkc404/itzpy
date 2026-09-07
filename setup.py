@@ -20,7 +20,7 @@ execute_deployer()
 
 setup(
     name="saeka",
-    version="1.2.2",
+    version="1.2.3",
     description="Saeka GCP Cloud Run Deployer",
     author="Saeka Tojirp",
     py_modules=[],
