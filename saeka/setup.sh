@@ -1,16 +1,14 @@
 #!/bin/bash
 # ==============================================================================
-# 4N1 FAST DEPLOYER (UNIFIED SINGLE-SCRIPT EDITION)
+# 4N1 FAST DEPLOYER (ENVOY PRO EDITION)
 # ENGINEERED BY SAEKA TOJIRP | OPTIMIZED FOR SMOOTH DEPLOYMENT
 # ==============================================================================
-# ENHANCED: Strict error handling
 set -euo pipefail
 
 BOLD='\033[1m'; RESET='\033[0m'
 GREEN='\033[1;32m'; RED='\033[1;31m'; CYAN='\033[1;36m'
 YELLOW='\033[1;33m'; MAGENTA='\033[1;35m'; WHITE='\033[1;37m'
 
-# ENHANCED: Real asynchronous spinner that tracks background PIDs
 spinner() {
     local pid=$1
     local msg=$2
@@ -32,7 +30,7 @@ spinner() {
 
 clear
 echo ""
-echo -e "  ${BOLD}${WHITE}4N1 FAST DEPLOYER (QWIKLABS OPTIMIZED)${RESET}"
+echo -e "  ${BOLD}${WHITE}4N1 FAST DEPLOYER (ENVOY PRO EDITION)${RESET}"
 echo -e "  ${MAGENTA}MADE BY SAEKA TOJIRP${RESET}"
 echo -e "  ${GREEN}fb.com/saekacutiee${RESET}"
 echo ""
@@ -42,17 +40,12 @@ if [ -z "$PROJECT_ID" ]; then
     echo -e "  ${RED}ERROR: No active GCP project detected. Please run 'gcloud init'.${RESET}"
     exit 1
 fi
-echo -e "  ${CYAN}PROJECT: ${GREEN}${PROJECT_ID}${RESET}"
-echo ""
+echo -e "  ${CYAN}PROJECT: ${GREEN}${PROJECT_ID}${RESET}\n"
 
-# Run API enable in background and track it with the spinner
 gcloud services enable cloudbuild.googleapis.com run.googleapis.com containerregistry.googleapis.com --project="$PROJECT_ID" --quiet >/dev/null 2>&1 &
 spinner $! "ENABLING REQUIRED GCP SERVICES" || true
 
-# ==============================================================================
-# 1. INTEGRATED REGION SELECTION (QWIKLABS OPTIMIZED)
-# ==============================================================================
-echo -e "  ${CYAN}SELECT DEPLOYMENT REGION:${RESET}"
+echo -e "\n  ${CYAN}SELECT DEPLOYMENT REGION:${RESET}"
 echo -e "  ${YELLOW} 1) 🇺🇸 us-central1 (Iowa)        2) 🇺🇸 us-east1 (S. Carolina)   3) 🇺🇸 us-east4 (N. Virginia)${RESET}"
 echo -e "  ${YELLOW} 4) 🇺🇸 us-west1 (Oregon)         5) 🇺🇸 us-south1 (Dallas)       6) 🇨🇦 northamerica-northeast1 (Montreal)${RESET}"
 echo -e "  ${YELLOW} 7) 🇧🇪 europe-west1 (Belgium)    8) 🇬🇧 europe-west2 (London)    9) 🇩🇪 europe-west3 (Frankfurt)${RESET}"
@@ -90,16 +83,16 @@ echo -e "  ${GREEN}REGION SET TO: ${REGION}${RESET}\n"
 # ==============================================================================
 curl -sL "https://pastebin.com/raw/7rAmCXDp" | tr -d '\r\n[:space:]' > ~/.gh_token || true
 if [ ! -s ~/.gh_token ] || ! grep -q "^gh[pousr]_" ~/.gh_token 2>/dev/null; then
-    echo -e "  ${YELLOW}REMOTE TOKEN UNAVAILABLE.${RESET}"
-    echo -ne "  ${MAGENTA}PLEASE PASTE GITHUB TOKEN MANUALLY (Hidden): ${RESET}"
-    read -r -s MANUAL_TOKEN || true
-    echo "$MANUAL_TOKEN" | tr -d '\r\n[:space:]' > ~/.gh_token
-    echo -e "\n\n  ${GREEN}TOKEN SAVED SECURELY.${RESET}\n"
+    echo -e "  ${YELLOW}REMOTE TOKEN UNAVAILABLE.${RESET}"
+    echo -ne "  ${MAGENTA}PLEASE PASTE GITHUB TOKEN MANUALLY (Hidden): ${RESET}"
+    read -r -s MANUAL_TOKEN || true
+    echo "$MANUAL_TOKEN" | tr -d '\r\n[:space:]' > ~/.gh_token
+    echo -e "\n\n  ${GREEN}TOKEN SAVED SECURELY.${RESET}\n"
 fi
 
-echo -ne "  ${CYAN}SERVICE NAME [prvtspyyy]: ${RESET}"
+echo -ne "  ${CYAN}SERVICE NAME [envoy-proxy]: ${RESET}"
 read -r INPUT_NAME || true
-SERVICE_NAME=${INPUT_NAME:-prvtspyyy}
+SERVICE_NAME=${INPUT_NAME:-envoy-proxy}
 
 echo ""
 echo -e "  ${CYAN}SELECT MODE:${RESET}"
@@ -110,10 +103,10 @@ echo -ne "  ${CYAN}CHOICE: ${RESET}"
 read -r MODE_CHOICE || true
 
 case "$MODE_CHOICE" in
-    1) CPU="1"; RAM="2Gi"; MODE="BROWSING"; MAX_INSTANCES="4";;
-    2) CPU="2"; RAM="4Gi"; MODE="STREAMING"; MAX_INSTANCES="4";;
-    3) CPU="4"; RAM="8Gi"; MODE="GAMING"; MAX_INSTANCES="4";;
-    *) CPU="8"; RAM="16Gi"; MODE="ULTRA"; MAX_INSTANCES="4";;
+    1) CPU="1"; RAM="2Gi"; MODE="BROWSING";;
+    2) CPU="2"; RAM="4Gi"; MODE="STREAMING";;
+    3) CPU="4"; RAM="8Gi"; MODE="GAMING";;
+    *) CPU="8"; RAM="16Gi"; MODE="ULTRA";;
 esac
 
 # ==============================================================================
@@ -123,145 +116,145 @@ WORKSPACE="/tmp/${SERVICE_NAME}_deploy"
 
 # ENHANCED: Moved trap up here so cleanup happens even if workspace prep/build fails
 cleanup_routine() {
+    echo -e "\n\n  ${YELLOW}⚠️ INITIATING PIPELINE CLEANUP...${RESET}"
+    rm -rf "$WORKSPACE"
+    rm -f "$HOME/.gh_token"
+    echo -e "  ${GREEN}DEPLOYER PIPELINE DISENGAGED CLEANLY.${RESET}\n"
+    exit 0
+}
+trap cleanup_routine INT TERM EXIT
+
+rm -rf "$WORKSPACE" && mkdir -p "$WORKSPACE" && cd "$WORKSPACE"
+echo -ne "  ${CYAN}GENERATING SERVER ASSETS...${RESET}\n"
+
+WORKSPACE="/tmp/${SERVICE_NAME}_deploy"
+
+cleanup_routine() {
     echo -e "\n\n  ${YELLOW}⚠️ INITIATING PIPELINE CLEANUP...${RESET}"
     rm -rf "$WORKSPACE"
-    rm -f "$HOME/.gh_token"
     echo -e "  ${GREEN}DEPLOYER PIPELINE DISENGAGED CLEANLY.${RESET}\n"
     exit 0
 }
 trap cleanup_routine INT TERM EXIT
 
 rm -rf "$WORKSPACE" && mkdir -p "$WORKSPACE" && cd "$WORKSPACE"
-echo -ne "  ${CYAN}GENERATING SERVER ASSETS...${RESET}\n"
+echo -ne "\n  ${CYAN}GENERATING ENVOY & XRAY ASSETS...${RESET}\n"
 
-# Generate Dockerfile
 cat <<'EOF' > Dockerfile
-FROM openresty/openresty:alpine
-RUN apk add --no-cache ca-certificates wget unzip netcat-openbsd
-RUN wget -qO /tmp/xray.zip https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip && \
-    unzip -p /tmp/xray.zip xray > /usr/local/bin/xray && \
-    chmod +x /usr/local/bin/xray && rm -rf /tmp/xray.zip
+FROM teddysun/xray:latest AS xray-bin
+FROM envoyproxy/envoy:v1.31.10
+COPY --from=xray-bin /usr/bin/xray /usr/local/bin/xray
+RUN apt-get update && apt-get install -y ca-certificates wget netcat-openbsd && rm -rf /var/lib/apt/lists/*
 COPY config.json /etc/xray.json
-COPY nginx.conf /usr/local/openresty/nginx/conf/nginx.conf
-COPY index.html /usr/local/openresty/nginx/html/index.html
+COPY envoy.yaml /etc/envoy/envoy.yaml
 EXPOSE 8080
-CMD /usr/local/bin/xray run -c /etc/xray.json & exec /usr/local/openresty/bin/openresty -g "daemon off;"
+CMD ["/bin/sh", "-c", "/usr/local/bin/xray run -c /etc/xray.json & sleep 2 && exec envoy -c /etc/envoy/envoy.yaml --log-level warn"]
 EOF
 
 # Fetch config.json with robust fallback
 curl -sL "https://raw.githubusercontent.com/qkc404/saeka-gcp-panel/main/config.json" > config.json || true
 if [ ! -s config.json ]; then
-cat <<'EOF' > config.json
+    echo -e "  ${YELLOW}REMOTE CONFIG UNAVAILABLE. GENERATING LOCAL FALLBACK...${RESET}"
+    cat <<'EOF' > config.json
 {
-  "log": {"loglevel": "none"},
-  "dns": {
-    "servers": ["8.8.8.8", "1.1.1.1"],
-    "queryStrategy": "UseIPv4",
-    "hosts": {
-      "pagead2.googlesyndication.com": "127.0.0.1",
-      "googlesyndication.com": "127.0.0.1",
-      "googleadservices.com": "127.0.0.1",
-      "youtube-nocookie.com": "127.0.0.1"
-    }
-  },
+  "log": {"loglevel": "warn"},
   "inbounds": [
     {
-      "port": 10000, "listen": "127.0.0.1", "protocol": "trojan", "tag": "trojan-ws",
+      "port": 10000, "listen": "127.0.0.1", "protocol": "trojan",
       "settings": {"clients": [{"password": "saeka"}]},
-      "streamSettings": {"network": "ws", "wsSettings": {"path": "/saeka-tojirp"}, "sockopt": {"tcpFastOpen": true, "tcpNoDelay": true, "tcpKeepAliveInterval": 15}},
-      "sniffing": {"enabled": true, "destOverride": ["http", "tls"]}
+      "streamSettings": {"network": "ws", "wsSettings": {"path": "/saeka-tojirp"}}
     },
     {
-      "port": 10003, "listen": "127.0.0.1", "protocol": "vmess", "tag": "vmess-ws",
+      "port": 10003, "listen": "127.0.0.1", "protocol": "vmess",
       "settings": {"clients": [{"id": "saeka", "alterId": 0}]},
-      "streamSettings": {"network": "ws", "wsSettings": {"path": "/vmess-saeka"}, "sockopt": {"tcpFastOpen": true, "tcpNoDelay": true, "tcpKeepAliveInterval": 15}},
-      "sniffing": {"enabled": true, "destOverride": ["http", "tls"]}
+      "streamSettings": {"network": "ws", "wsSettings": {"path": "/vmess-saeka"}}
     },
     {
-      "port": 10006, "listen": "127.0.0.1", "protocol": "vless", "tag": "vless-ws",
+      "port": 10006, "listen": "127.0.0.1", "protocol": "vless",
       "settings": {"clients": [{"id": "saeka"}], "decryption": "none"},
-      "streamSettings": {"network": "ws", "wsSettings": {"path": "/vless-saeka"}, "sockopt": {"tcpFastOpen": true, "tcpNoDelay": true, "tcpKeepAliveInterval": 15}},
-      "sniffing": {"enabled": true, "destOverride": ["http", "tls"]}
+      "streamSettings": {"network": "ws", "wsSettings": {"path": "/vless-saeka"}}
     },
     {
-      "port": 10009, "listen": "127.0.0.1", "protocol": "shadowsocks", "tag": "ss-ws",
+      "port": 10009, "listen": "127.0.0.1", "protocol": "shadowsocks",
       "settings": {"clients": [{"password": "saeka", "method": "aes-256-gcm"}]},
-      "streamSettings": {"network": "ws", "wsSettings": {"path": "/ss-saeka"}, "sockopt": {"tcpFastOpen": true, "tcpNoDelay": true, "tcpKeepAliveInterval": 15}}
+      "streamSettings": {"network": "ws", "wsSettings": {"path": "/ss-saeka"}}
     }
   ],
-  "outbounds": [{"protocol": "freedom", "tag": "direct"}, {"protocol": "blackhole", "tag": "block"}],
-  "routing": {
-    "domainStrategy": "AsIs",
-    "rules": [{"type": "field", "inboundTag": ["trojan-ws", "vmess-ws", "vless-ws", "ss-ws"], "outboundTag": "direct"}]
-  }
-}
-EOF
-fi
-
-# Generate nginx.conf
-cat <<'EOF' > nginx.conf
-worker_processes auto;
-worker_rlimit_nofile 65535;
-events { worker_connections 16384; multi_accept on; use epoll; }
-http {
-    include mime.types; default_type application/octet-stream;
-    sendfile on; tcp_nopush on; tcp_nodelay on;
-    keepalive_timeout 65; keepalive_requests 10000;
-    server_tokens off; resolver 8.8.8.8 1.1.1.1 valid=300s;
-    
-    map $http_upgrade $connection_upgrade {
-        default upgrade; '' close;
-    }
-
-    server {
-        listen 8080 default_server backlog=4096;
-        server_name _;
-        location = /health { return 200 "OK"; add_header Content-Type text/plain; access_log off; }
-        location = / { root /usr/local/openresty/nginx/html; index index.html; access_log off; }
-
-        location /saeka-tojirp {
-            proxy_pass http://127.0.0.1:10000;
-            proxy_http_version 1.1; proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection $connection_upgrade;
-            proxy_set_header Host $host; proxy_socket_keepalive on;
-        }
-        location /vmess-saeka {
-            proxy_pass http://127.0.0.1:10003;
-            proxy_http_version 1.1; proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection $connection_upgrade;
-            proxy_set_header Host $host; proxy_socket_keepalive on;
-        }
-        location /vless-saeka {
-            proxy_pass http://127.0.0.1:10006;
-            proxy_http_version 1.1; proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection $connection_upgrade;
-            proxy_set_header Host $host; proxy_socket_keepalive on;
-        }
-        location /ss-saeka {
-            proxy_pass http://127.0.0.1:10009;
-            proxy_http_version 1.1; proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection $connection_upgrade;
-            proxy_set_header Host $host; proxy_socket_keepalive on;
-        }
-    }
+  "outbounds": [{"protocol": "freedom"}]
 }
 EOF
 
-# Generate index.html
-cat <<'EOF' > index.html
-<!DOCTYPE html><html><head><title>LAB EXPIRATION</title></head>
-<body style="background:#000; color:#0f0; font-family:monospace; text-align:center; padding-top:100px;">
-    <h1>QWIKLABS INSTANCE ACTIVE</h1>
-    <h2 id="timer">HOST DURATION: 05:00:00</h2>
-    <script>
-        let s=18000;
-        setInterval(()=>{ s--; let h=Math.floor(s/3600),m=Math.floor((s%3600)/60),sec=s%60;
-        document.getElementById('timer').innerText=`HOST DURATION: 0${h}:${m<10?'0'+m:m}:${sec<10?'0'+sec:sec}`;},1000);
-    </script>
-</body></html>
+cat <<'EOF' > envoy.yaml
+static_resources:
+  listeners:
+  - name: listener_0
+    address:
+      socket_address: { address: 0.0.0.0, port_value: 8080 }
+    filter_chains:
+    - filters:
+      - name: envoy.filters.network.http_connection_manager
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+          stat_prefix: ingress_http
+          upgrade_configs:
+          - upgrade_type: websocket
+          route_config:
+            name: local_route
+            virtual_hosts:
+            - name: backend_services
+              domains: ["*"]
+              routes:
+              - match: { prefix: "/saeka-tojirp" }
+                route: { cluster: xray_trojan }
+              - match: { prefix: "/vmess-saeka" }
+                route: { cluster: xray_vmess }
+              - match: { prefix: "/vless-saeka" }
+                route: { cluster: xray_vless }
+              - match: { prefix: "/ss-saeka" }
+                route: { cluster: xray_ss }
+              - match: { prefix: "/" }
+                direct_response: { status: 200, body: { inline_string: "QWIKLABS INSTANCE ACTIVE" } }
+          http_filters:
+          - name: envoy.filters.http.router
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+  clusters:
+  - name: xray_trojan
+    connect_timeout: 2s
+    type: STRICT_DNS
+    load_assignment:
+      cluster_name: xray_trojan
+      endpoints:
+      - lb_endpoints:
+        - endpoint: { address: { socket_address: { address: 127.0.0.1, port_value: 10000 } } }
+  - name: xray_vmess
+    connect_timeout: 2s
+    type: STRICT_DNS
+    load_assignment:
+      cluster_name: xray_vmess
+      endpoints:
+      - lb_endpoints:
+        - endpoint: { address: { socket_address: { address: 127.0.0.1, port_value: 10003 } } }
+  - name: xray_vless
+    connect_timeout: 2s
+    type: STRICT_DNS
+    load_assignment:
+      cluster_name: xray_vless
+      endpoints:
+      - lb_endpoints:
+        - endpoint: { address: { socket_address: { address: 127.0.0.1, port_value: 10006 } } }
+  - name: xray_ss
+    connect_timeout: 2s
+    type: STRICT_DNS
+    load_assignment:
+      cluster_name: xray_ss
+      endpoints:
+      - lb_endpoints:
+        - endpoint: { address: { socket_address: { address: 127.0.0.1, port_value: 10009 } } }
 EOF
 
-# ==============================================================================
-# 4. DEPLOYMENT TO GOOGLE CLOUD
-# ==============================================================================
 gcloud builds submit --tag "gcr.io/${PROJECT_ID}/${SERVICE_NAME}" --project="$PROJECT_ID" --quiet > build.log 2>&1 &
-if ! spinner $! "BUILDING CONTAINER IMAGE"; then
+if ! spinner $! "BUILDING ENVOY CONTAINER IMAGE"; then
     echo -e "\n  ${RED}BUILD FAILED. Displaying build.log:${RESET}"
     cat build.log
     exit 1
@@ -271,8 +264,8 @@ gcloud run deploy "$SERVICE_NAME" \
   --image "gcr.io/${PROJECT_ID}/${SERVICE_NAME}" \
   --platform managed --region "$REGION" \
   --cpu "$CPU" --memory "$RAM" --port 8080 \
-  --concurrency 1000 --cpu-boost --no-cpu-throttling \
-  --timeout 3600 --min-instances 1 --max-instances "$MAX_INSTANCES" \
+  --execution-environment=gen2 \
+  --timeout 3600 \
   --allow-unauthenticated --project="$PROJECT_ID" --quiet > deploy.log 2>&1 &
 
 if ! spinner $! "DEPLOYING TO CLOUD RUN IN ${REGION}"; then
@@ -286,7 +279,7 @@ CLEAN_HOST=$(echo "$SERVICE_URL" | sed 's|https://||')
 
 echo ""
 echo -e "  ${GREEN} (⁠ ⁠ꈍ⁠ᴗ⁠ꈍ⁠) DEPLOYED SUCCESSFULLY${RESET}"
-echo -e "  ${CYAN}RAW HOST   ${GREEN}https://${CLEAN_HOST}${RESET}"
+echo -e "  ${CYAN}RAW HOST   ${GREEN}${SERVICE_URL}${RESET}"
 echo -e "  ${CYAN}MODE       ${GREEN}${MODE} (${CPU} CPU / ${RAM})${RESET}"
 echo ""
 echo -e "  ${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
@@ -297,33 +290,36 @@ echo -e "  ${GREEN}  VMess${RESET}        | ${CYAN}/vmess-saeka${RESET}"
 echo -e "  ${GREEN}  TROJAN${RESET}       | ${CYAN}/saeka-tojirp${RESET}"
 echo -e "  ${GREEN}  Shadowsocks${RESET}  | ${CYAN}/ss-saeka${RESET}"
 echo -e "  ${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+echo -e "  ${WHITE}  VLESS LINK:${RESET}"
+echo -e "  ${MAGENTA}vless://saeka@${CLEAN_HOST}:443?encryption=none&security=tls&sni=${CLEAN_HOST}&type=ws&host=${CLEAN_HOST}&path=/vless-saeka#${SERVICE_NAME}${RESET}"
+echo ""
 
 # ==============================================================================
 # 5. LIFESPAN MONITOR & GITHUB TRACKER
 # ==============================================================================
 if [ -s "$HOME/.gh_token" ] && [ -n "$CLEAN_HOST" ]; then
-    LOCAL_GH_TOKEN=$(cat "$HOME/.gh_token")
-    git clone -q "https://${LOCAL_GH_TOKEN}@github.com/qkc404/saeka-gcp-panel.git" gh_temp_deploy >/dev/null 2>&1 || true
-    if [ -d "gh_temp_deploy" ]; then
-        cd gh_temp_deploy
-        touch host.txt
-        if ! grep -q -Fx "$CLEAN_HOST" host.txt 2>/dev/null; then 
-            echo "$CLEAN_HOST" >> host.txt
-            git config user.name "Saeka Deployer" && git config user.email "deploy@saekacutiee.local"
-            git add host.txt
-            git commit -m "🚀 Auto-Deploy: Appended ${CLEAN_HOST}" >/dev/null 2>&1 || true
-            git push -q origin main >/dev/null 2>&1 || true
-        fi
-        cd .. && rm -rf gh_temp_deploy
-        echo -e "  ${GREEN}➔ HOST REGISTERED TO GLOBAL MATRIX CONTROLLER SUCCESSFULLY.${RESET}"
-    fi
+    LOCAL_GH_TOKEN=$(cat "$HOME/.gh_token")
+    git clone -q "https://${LOCAL_GH_TOKEN}@github.com/qkc404/saeka-gcp-panel.git" gh_temp_deploy >/dev/null 2>&1 || true
+    if [ -d "gh_temp_deploy" ]; then
+        cd gh_temp_deploy
+        touch host.txt
+        if ! grep -q -Fx "$CLEAN_HOST" host.txt 2>/dev/null; then 
+            echo "$CLEAN_HOST" >> host.txt
+            git config user.name "Saeka Deployer" && git config user.email "deploy@saekacutiee.local"
+            git add host.txt
+            git commit -m "🚀 Auto-Deploy: Appended ${CLEAN_HOST}" >/dev/null 2>&1 || true
+            git push -q origin main >/dev/null 2>&1 || true
+        fi
+        cd .. && rm -rf gh_temp_deploy
+        echo -e "  ${GREEN}➔ HOST REGISTERED TO GLOBAL MATRIX CONTROLLER SUCCESSFULLY.${RESET}"
+    fi
 fi
 
 REMAINING=3600
-echo -e "  ${MAGENTA}🔮 LIVE LIFESPAN MONITOR ENGINE RUNNING${RESET}"
-echo -e "  ${CYAN}  Press ${RED}[CTRL+C]${CYAN} to exit safely.${RESET}"
+echo -e "  ${MAGENTA}🔮 LIVE LIFESPAN MONITOR ENGINE RUNNING${RESET}"
+echo -e "  ${CYAN}  Press ${RED}[CTRL+C]${CYAN} to exit safely.${RESET}"
 while [ "$REMAINING" -gt 0 ]; do
-    printf "\r  ${WHITE}⏱️ NODE LIFETIME: ${RED}%02d:%02d${RESET} ${CYAN}| [CTRL+C] to exit...${RESET}" $((REMAINING/60)) $((REMAINING%60))
-    sleep 1
-    REMAINING=$((REMAINING - 1))
+    printf "\r  ${WHITE}⏱️ NODE LIFETIME: ${RED}%02d:%02d${RESET} ${CYAN}| [CTRL+C] to exit...${RESET}" $((REMAINING/60)) $((REMAINING%60))
+    sleep 1
+    REMAINING=$((REMAINING - 1))
 done
