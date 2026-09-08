@@ -3,22 +3,31 @@
 # 4N1 FAST DEPLOYER (UNIFIED SINGLE-SCRIPT EDITION)
 # ENGINEERED BY SAEKA TOJIRP | OPTIMIZED FOR SMOOTH DEPLOYMENT
 # ==============================================================================
-set -e
+# ENHANCED: Strict error handling
+set -euo pipefail
 
 BOLD='\033[1m'; RESET='\033[0m'
 GREEN='\033[1;32m'; RED='\033[1;31m'; CYAN='\033[1;36m'
 YELLOW='\033[1;33m'; MAGENTA='\033[1;35m'; WHITE='\033[1;37m'
 
-loading() {
-    local t="$1"
+# ENHANCED: Real asynchronous spinner that tracks background PIDs
+spinner() {
+    local pid=$1
+    local msg=$2
     local s="⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
-    for ((i=0;i<5;i++)); do 
-        for ((j=0;j<${#s};j++)); do 
-            echo -ne "\r  ${CYAN}${s:$j:1} ${t}...${RESET}"
-            sleep 0.05
-        done
+    local i=0
+    while kill -0 "$pid" 2>/dev/null; do
+        echo -ne "\r  ${CYAN}${s:$((i % ${#s})):1} ${msg}...${RESET}"
+        i=$((i + 1))
+        sleep 0.1
     done
-    echo -ne "\r  ${GREEN}DONE: ${t}${RESET}\n"
+    wait "$pid"
+    if [ $? -eq 0 ]; then
+        echo -ne "\r  ${GREEN}✓ DONE: ${msg}${RESET}                       \n"
+    else
+        echo -ne "\r  ${RED}✗ FAILED: ${msg}${RESET}                     \n"
+        return 1
+    fi
 }
 
 clear
@@ -28,38 +37,51 @@ echo -e "  ${MAGENTA}MADE BY SAEKA TOJIRP${RESET}"
 echo -e "  ${GREEN}fb.com/saekacutiee${RESET}"
 echo ""
 
-# Auto-detect from Cloud Shell env variable first, fallback to gcloud config
-PROJECT_ID="${DEVSHELL_PROJECT_ID:-$(gcloud config get-value project 2>/dev/null | tr -d '[:space:]')}"
-
-if [ -z "$PROJECT_ID" ] || [ "$PROJECT_ID" = "(unset)" ]; then
-    echo -e "  ${RED}ERROR: No active GCP project detected. Please run 'gcloud config set project <PROJECT_ID>'.${RESET}"
+PROJECT_ID=$(gcloud config get-value project 2>/dev/null | tr -d '[:space:]')
+if [ -z "$PROJECT_ID" ]; then
+    echo -e "  ${RED}ERROR: No active GCP project detected. Please run 'gcloud init'.${RESET}"
     exit 1
 fi
 echo -e "  ${CYAN}PROJECT: ${GREEN}${PROJECT_ID}${RESET}"
 echo ""
 
-# Ensure required GCP APIs are enabled (prevents silent gcloud exit status 1)
-loading "ENABLING REQUIRED GCP SERVICES"
-gcloud services enable cloudbuild.googleapis.com run.googleapis.com containerregistry.googleapis.com --project="$PROJECT_ID" --quiet >/dev/null 2>&1 || true
+# Run API enable in background and track it with the spinner
+gcloud services enable cloudbuild.googleapis.com run.googleapis.com containerregistry.googleapis.com --project="$PROJECT_ID" --quiet >/dev/null 2>&1 &
+spinner $! "ENABLING REQUIRED GCP SERVICES" || true
 
 # ==============================================================================
-# 1. INTEGRATED REGION SELECTION
+# 1. INTEGRATED REGION SELECTION (QWIKLABS OPTIMIZED)
 # ==============================================================================
 echo -e "  ${CYAN}SELECT DEPLOYMENT REGION:${RESET}"
-echo -e "  ${YELLOW}1) us-central1   2) us-east1       3) us-west1${RESET}"
-echo -e "  ${YELLOW}4) asia-east1    5) asia-southeast1${RESET}"
-echo -e "  ${YELLOW}6) europe-west1  7) europe-west4${RESET}"
+echo -e "  ${YELLOW} 1) 🇺🇸 us-central1 (Iowa)        2) 🇺🇸 us-east1 (S. Carolina)   3) 🇺🇸 us-east4 (N. Virginia)${RESET}"
+echo -e "  ${YELLOW} 4) 🇺🇸 us-west1 (Oregon)         5) 🇺🇸 us-south1 (Dallas)       6) 🇨🇦 northamerica-northeast1 (Montreal)${RESET}"
+echo -e "  ${YELLOW} 7) 🇧🇪 europe-west1 (Belgium)    8) 🇬🇧 europe-west2 (London)    9) 🇩🇪 europe-west3 (Frankfurt)${RESET}"
+echo -e "  ${YELLOW}10) 🇳🇱 europe-west4 (Netherlands)11) 🇫🇷 europe-west9 (Paris)   12) 🇹🇼 asia-east1 (Taiwan)${RESET}"
+echo -e "  ${YELLOW}13) 🇭🇰 asia-east2 (Hong Kong)   14) 🇸🇬 asia-southeast1 (SG)    15) 🇯🇵 asia-northeast1 (Tokyo)${RESET}"
+echo -e "  ${YELLOW}16) 🇰🇷 asia-northeast3 (Seoul)  17) 🇦🇺 australia-southeast1 (Sydney)${RESET}"
 echo ""
-read -r -p "$(echo -e "  ${CYAN}CHOICE [1-7]: ${RESET}")" REGION_CHOICE || true
+
+echo -ne "  ${CYAN}CHOICE [1-17]: ${RESET}"
+read -r REGION_CHOICE || true
 
 case "$REGION_CHOICE" in
-    2) REGION="us-east1";;
-    3) REGION="us-west1";;
-    4) REGION="asia-east1";;
-    5) REGION="asia-southeast1";;
-    6) REGION="europe-west1";;
-    7) REGION="europe-west4";;
-    *) REGION="us-central1";;
+    2)  REGION="us-east1";;
+    3)  REGION="us-east4";;
+    4)  REGION="us-west1";;
+    5)  REGION="us-south1";;
+    6)  REGION="northamerica-northeast1";;
+    7)  REGION="europe-west1";;
+    8)  REGION="europe-west2";;
+    9)  REGION="europe-west3";;
+    10) REGION="europe-west4";;
+    11) REGION="europe-west9";;
+    12) REGION="asia-east1";;
+    13) REGION="asia-east2";;
+    14) REGION="asia-southeast1";;
+    15) REGION="asia-northeast1";;
+    16) REGION="asia-northeast3";;
+    17) REGION="australia-southeast1";;
+    *)  REGION="us-central1";;
 esac
 echo -e "  ${GREEN}REGION SET TO: ${REGION}${RESET}\n"
 
@@ -69,12 +91,14 @@ echo -e "  ${GREEN}REGION SET TO: ${REGION}${RESET}\n"
 curl -sL "https://pastebin.com/raw/7rAmCXDp" | tr -d '\r\n[:space:]' > ~/.gh_token || true
 if [ ! -s ~/.gh_token ] || ! grep -q "^gh[pousr]_" ~/.gh_token 2>/dev/null; then
     echo -e "  ${YELLOW}REMOTE TOKEN UNAVAILABLE.${RESET}"
-    read -r -s -p "$(echo -e "  ${MAGENTA}PLEASE PASTE GITHUB TOKEN MANUALLY (Hidden): ${RESET}")" MANUAL_TOKEN || true
+    echo -ne "  ${MAGENTA}PLEASE PASTE GITHUB TOKEN MANUALLY (Hidden): ${RESET}"
+    read -r -s MANUAL_TOKEN || true
     echo "$MANUAL_TOKEN" | tr -d '\r\n[:space:]' > ~/.gh_token
-    echo -e "\n  ${GREEN}TOKEN SAVED SECURELY.${RESET}\n"
+    echo -e "\n\n  ${GREEN}TOKEN SAVED SECURELY.${RESET}\n"
 fi
 
-read -r -p "$(echo -e "  ${CYAN}SERVICE NAME [prvtspyyy]: ${RESET}")" INPUT_NAME || true
+echo -ne "  ${CYAN}SERVICE NAME [prvtspyyy]: ${RESET}"
+read -r INPUT_NAME || true
 SERVICE_NAME=${INPUT_NAME:-prvtspyyy}
 
 echo ""
@@ -82,7 +106,8 @@ echo -e "  ${CYAN}SELECT MODE:${RESET}"
 echo -e "  ${YELLOW}1) BROWSING (1 vCPU / 2Gi)  2) STREAMING (2 vCPU / 4Gi)${RESET}"
 echo -e "  ${YELLOW}3) GAMING   (4 vCPU / 8Gi)  4) ULTRA     (8 vCPU / 16Gi)${RESET}"
 echo ""
-read -r -p "$(echo -e "  ${CYAN}CHOICE: ${RESET}")" MODE_CHOICE || true
+echo -ne "  ${CYAN}CHOICE: ${RESET}"
+read -r MODE_CHOICE || true
 
 case "$MODE_CHOICE" in
     1) CPU="1"; RAM="2Gi"; MODE="BROWSING"; MAX_INSTANCES="4";;
@@ -95,8 +120,19 @@ esac
 # 3. DYNAMIC WORKSPACE & ASSET GENERATION
 # ==============================================================================
 WORKSPACE="/tmp/${SERVICE_NAME}_deploy"
+
+# ENHANCED: Moved trap up here so cleanup happens even if workspace prep/build fails
+cleanup_routine() {
+    echo -e "\n\n  ${YELLOW}⚠️ INITIATING PIPELINE CLEANUP...${RESET}"
+    rm -rf "$WORKSPACE"
+    rm -f "$HOME/.gh_token"
+    echo -e "  ${GREEN}DEPLOYER PIPELINE DISENGAGED CLEANLY.${RESET}\n"
+    exit 0
+}
+trap cleanup_routine INT TERM EXIT
+
 rm -rf "$WORKSPACE" && mkdir -p "$WORKSPACE" && cd "$WORKSPACE"
-loading "GENERATING SERVER ASSETS"
+echo -ne "  ${CYAN}GENERATING SERVER ASSETS...${RESET}\n"
 
 # Generate Dockerfile
 cat <<'EOF' > Dockerfile
@@ -224,21 +260,22 @@ EOF
 # ==============================================================================
 # 4. DEPLOYMENT TO GOOGLE CLOUD
 # ==============================================================================
-loading "BUILDING CONTAINER IMAGE"
-if ! gcloud builds submit --tag "gcr.io/${PROJECT_ID}/${SERVICE_NAME}" --project="$PROJECT_ID" --quiet > build.log 2>&1; then
+gcloud builds submit --tag "gcr.io/${PROJECT_ID}/${SERVICE_NAME}" --project="$PROJECT_ID" --quiet > build.log 2>&1 &
+if ! spinner $! "BUILDING CONTAINER IMAGE"; then
     echo -e "\n  ${RED}BUILD FAILED. Displaying build.log:${RESET}"
     cat build.log
     exit 1
 fi
 
-loading "DEPLOYING TO CLOUD RUN IN ${REGION}"
-if ! gcloud run deploy "$SERVICE_NAME" \
+gcloud run deploy "$SERVICE_NAME" \
   --image "gcr.io/${PROJECT_ID}/${SERVICE_NAME}" \
   --platform managed --region "$REGION" \
   --cpu "$CPU" --memory "$RAM" --port 8080 \
   --concurrency 1000 --cpu-boost --no-cpu-throttling \
   --timeout 3600 --min-instances 1 --max-instances "$MAX_INSTANCES" \
-  --allow-unauthenticated --project="$PROJECT_ID" --quiet > deploy.log 2>&1; then
+  --allow-unauthenticated --project="$PROJECT_ID" --quiet > deploy.log 2>&1 &
+
+if ! spinner $! "DEPLOYING TO CLOUD RUN IN ${REGION}"; then
     echo -e "\n  ${RED}DEPLOYMENT FAILED. Displaying deploy.log:${RESET}"
     cat deploy.log
     exit 1
@@ -281,15 +318,6 @@ if [ -s "$HOME/.gh_token" ] && [ -n "$CLEAN_HOST" ]; then
         echo -e "  ${GREEN}➔ HOST REGISTERED TO GLOBAL MATRIX CONTROLLER SUCCESSFULLY.${RESET}"
     fi
 fi
-
-cleanup_routine() {
-    echo -e "\n\n  ${YELLOW}⚠️ INITIATING PIPELINE CLEANUP...${RESET}"
-    rm -rf "$WORKSPACE"
-    rm -f "$HOME/.gh_token"
-    echo -e "  ${GREEN}DEPLOYER PIPELINE DISENGAGED CLEANLY.${RESET}\n"
-    exit 0
-}
-trap cleanup_routine INT TERM EXIT
 
 REMAINING=3600
 echo -e "  ${MAGENTA}🔮 LIVE LIFESPAN MONITOR ENGINE RUNNING${RESET}"
