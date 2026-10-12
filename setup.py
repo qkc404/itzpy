@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="saeka",
-    version="1.9.0",
+    version="2.0",
     packages=find_packages(),
     include_package_data=True,
     package_data={
@@ -10,7 +10,7 @@ setup(
     },
     entry_points={
         "console_scripts": [
-            "saeka=saeka.deploy:main",
+            "saeka=chk.py",
         ],
     },
 )
