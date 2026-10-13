@@ -1,14 +1,27 @@
+# language: Python 3, file: m.py
+# deps: requests, colorama, cfonts, playwright, packaging
+#
+# TERMUX SETUP:
+#   pkg install x11-repo && pkg update
+#   pkg install python nodejs chromium termux-api
+#   pip install termux-playwright packaging
+#   python -m termux_playwright install
+#   ln -s /data/data/com.termux/files/usr/bin/node /data/data/com.termux/files/usr/lib/python3.14/site-packages/playwright/driver/node
+#   termux-wake-lock
+#   export CHROMIUM_PATH=/data/data/com.termux/files/usr/lib/chromium/chrome
+
 import os, re, sys, json, time, base64, hashlib, getpass, random, asyncio, threading, itertools, subprocess
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from typing import Any
+from urllib.parse import urlparse
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
 except Exception:
     pass
 
-for _pkg in ("requests", "colorama", "cfonts"):
+for _pkg in ("requests", "colorama", "cfonts", "packaging"):
     try:
         __import__(_pkg)
     except ImportError:
@@ -17,9 +30,13 @@ for _pkg in ("requests", "colorama", "cfonts"):
 import requests
 from colorama import Fore, Style, init
 from cfonts import render
+from packaging.version import Version, InvalidVersion
 
 init(autoreset=True)
 
+# =========================================================
+#  PALETTE
+# =========================================================
 WHITE   = Fore.LIGHTWHITE_EX + Style.BRIGHT
 CYAN    = Fore.LIGHTCYAN_EX + Style.BRIGHT
 RED     = Fore.LIGHTRED_EX + Style.BRIGHT
@@ -33,6 +50,106 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(SCRIPT_DIR, "config.json")
 STORE_CACHE = os.path.join(SCRIPT_DIR, "shopify_stores.json")
 
+# =========================================================
+#  VERSION + GITHUB AUTO-UPDATE
+# =========================================================
+APP_VERSION = "10.0"
+GITHUB_REPO = "qkc404/itzpy"
+PYPI_PACKAGE = "saeka"
+GITHUB_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+
+def _remote_version() -> str | None:
+    """Fetch the latest release tag from GitHub. Returns clean version string or None."""
+    try:
+        r = requests.get(GITHUB_API, timeout=8,
+                         headers={"User-Agent": f"saeka/{APP_VERSION}"})
+        if r.status_code != 200:
+            return None
+        tag = str(r.json().get("tag_name", "")).strip()
+        if not tag:
+            return None
+        clean = tag.lstrip("vV").strip()
+        return clean or None
+    except Exception:
+        return None
+
+def check_for_update() -> str | None:
+    """Return the newer version string if an update exists, else None."""
+    remote = _remote_version()
+    if not remote:
+        return None
+    try:
+        if Version(remote) > Version(APP_VERSION):
+            return remote
+    except InvalidVersion:
+        # fallback to string compare if not PEP 440
+        if remote != APP_VERSION:
+            return remote
+    return None
+
+def do_update(version: str) -> bool:
+    """pip install saeka==<version>. Returns True on success."""
+    print()
+    print(YELLOW + "  ╭─────────────────────────────────────────────────────╮" + R)
+    print(YELLOW + f"  │  update available: {APP_VERSION} → {version:<18}│" + R)
+    print(YELLOW + "  │  fetching from PyPI...                              │" + R)
+    print(YELLOW + "  ╰─────────────────────────────────────────────────────╯" + R)
+    print()
+    spec = f"{PYPI_PACKAGE}=={version}"
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-m", "pip", "install", "--upgrade",
+             "--no-cache-dir", spec],
+            capture_output=True, text=True, timeout=180,
+        )
+        if proc.returncode == 0:
+            print("  " + GREEN + f"✓ installed {spec}" + R)
+            time.sleep(1.0)
+            return True
+        print("  " + RED + f"✗ pip failed (code {proc.returncode})" + R)
+        tail = (proc.stderr or proc.stdout or "").strip().splitlines()[-3:]
+        for line in tail:
+            print("  " + DIM + line[:100] + R)
+        return False
+    except subprocess.TimeoutExpired:
+        print("  " + RED + "✗ pip timed out" + R)
+        return False
+    except Exception as e:
+        print("  " + RED + f"✗ pip error: {e}" + R)
+        return False
+
+def relaunch() -> None:
+    """Replace current process with a fresh python running the same script."""
+    print("  " + YELLOW + "relaunching..." + R)
+    time.sleep(0.8)
+    try:
+        os.execv(sys.executable, [sys.executable] + sys.argv)
+    except Exception as e:
+        print("  " + RED + f"relaunch failed: {e} — restart manually" + R)
+        sys.exit(0)
+
+def auto_update_gate() -> None:
+    """Check GitHub; if newer, offer install + relaunch."""
+    new_ver = check_for_update()
+    if not new_ver:
+        return
+    print()
+    print(YELLOW + "  ┌─ update detected " + "─" * 42 + "┐" + R)
+    print(f"  {WHITE}current:{R} {APP_VERSION}")
+    print(f"  {WHITE}latest :{R} {YELLOW}{new_ver}{R}")
+    print(YELLOW + "  └" + "─" * 60 + "┘" + R)
+    print()
+    ans = input("  " + YELLOW + f"install saeka=={new_ver} now? (y/n) ▸ " + R).strip().lower()
+    if ans != "y":
+        print("  " + DIM + "skipping — continuing on current version" + R)
+        time.sleep(1.0)
+        return
+    if do_update(new_ver):
+        relaunch()
+
+# =========================================================
+#  ENDPOINTS
+# =========================================================
 CC_API = "https://uncoder.eu.org/cc-checker/api.php"
 CC_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Linux; Android 15) AppleWebKit/537.36 Chrome/137.0.0.0 Mobile Safari/537.36",
@@ -56,7 +173,7 @@ STATUS_COLOR = {
 BOX_W = 64
 
 # =========================================================
-#  500+ SHOPIFY DOMAINS (from BeaverCheck, Adyntel, TechLeads, Shopify blog)
+#  SHOPIFY DOMAINS
 # =========================================================
 SHOPIFY_DOMAINS = """
 gymshark.com, allbirds.com, fashionnova.com, kyliecosmetics.com, tatcha.com,
@@ -89,13 +206,13 @@ nobullproject.com, vivobarefoot.com, merrell.com, hoka.com, fleetfeet.com,
 roadrunnersports.com, jackrabbit.com, runningwarehouse.com, holabirdsports.com,
 troubadourgoods.com, thehoneypot.co, beautybakerie.com, cheekbonebeauty.com,
 meowmeowtweet.com, beneathyourmask.com, lastobject.com, econea.com, flourist.com,
-brooklinen.com, hiutdenim.co.uk, allbirds.eu, bodybuilding.com, grind.co.uk,
-rayconglobal.com, puravidabracelets.com, mattel.com, wyzecam.com, condorcycles.com,
-pipsnacks.com, netflix.shop, stevemadden.com, fentybeauty.com, on.com, ecoflow.com,
-voomisupply.com, goodbuygear.com, humehealth.com, wearfigs.com, slumberland.com,
-jackery.com, cupshe.com, dreametech.com, ugreen.com, bugmd.com, carparts.com,
-restaurantware.com, aloyoga.com, eufy.com, velotricbike.com, jenis.com, wecreat.com,
-xtool.com, nrsworld.com, thornebros.com, shokz.com, tartecosmetics.com, ftd.com,
+hiutdenim.co.uk, allbirds.eu, bodybuilding.com, grind.co.uk, rayconglobal.com,
+puravidabracelets.com, mattel.com, wyzecam.com, condorcycles.com, pipsnacks.com,
+netflix.shop, stevemadden.com, on.com, ecoflow.com, voomisupply.com,
+goodbuygear.com, humehealth.com, wearfigs.com, slumberland.com, jackery.com,
+cupshe.com, dreametech.com, ugreen.com, bugmd.com, carparts.com, restaurantware.com,
+aloyoga.com, eufy.com, velotricbike.com, jenis.com, wecreat.com, xtool.com,
+nrsworld.com, thornebros.com, shokz.com, tartecosmetics.com, ftd.com,
 speediance.com, laserpecker.net, ooni.com, wybotpool.com, glossgenius.com,
 bagsmart.com, nobltravel.com, jwpei.com, orthofeet.com, segway.com,
 ryzesuperfoods.com, tymobeauty.com, gaia.com, thewoobles.com, stanley1913.com,
@@ -114,24 +231,27 @@ auxbeam.com, design-edc.com, edusensetoys.com, autos-suggestions.ca, dirniashop.
 cloudhamptonvape.com, blbijou.com, elkhartrvparts.com, apexpack.co.nz, afilm.me,
 densifil.com, apollomvmt.com, ecosoyabrands.com, gametraderzero.com, minbie.co.uk,
 universefrequencies.store, valmeris.com, successhuntersprints.com,
-demovehicles.rivian.com, dfyne.com, uk.ooni.com, saffnco.com, shop.becleverman.com,
-mokinglobal.com, toyworldinc.co, unifydrive.com, mroace.com, ketodirect.com.au,
-iamgia.com, primalpastures.com, cirklestreet.com, charmingintimates.com,
+demovehicles.rivian.com, dfyne.com, uk.ooni.com, saffnco.com, mokinglobal.com,
+toyworldinc.co, unifydrive.com, mroace.com, ketodirect.com.au, iamgia.com,
+primalpastures.com, cirklestreet.com, charmingintimates.com,
 thebronxclothingcompany.com, konainfashion.com, glowzii.com, clickenshop.com,
-methodk9shop.com, mynumy.com, vidawheel.com, shop.geektherapeutics.com, eu.hookii.com,
-soneesports.com, store.shopqwlc.com, 1cor311publishing.com, choralmusicpublishing.co.uk,
-www.sawtellepublishing.com, www.pkdpublishing.com, birdcitycomics.com,
+methodk9shop.com, mynumy.com, vidawheel.com, soneesports.com,
 appliancespares.com.au, creativecrochetstore.co.uk, spellboundsistersbookstore.com,
-zillymonkey.com, gatheringgames.co.uk, shop.cenex.com, eternacards.co.uk,
-www.brooklynhaberdashery.com, naturespeaksprints.com, rungoodlife.com,
-www.cardcaverntradingcards.com, primeprotector.at, joshscards.com, gbtoys.com.au,
-postcardstore.in, store.sho.com, deathwishcoffee.com, resilia.shop, smooche.com,
-helloklean.com, blenderseyewear.com, c9champion.shopping, dagne-dover.shopping,
-dagnedover.shopping, fieldluft.de, cozyearth.com, schutz-shoes.com,
-miloustyle.myshopify.com, dubgum.com
+zillymonkey.com, gatheringgames.co.uk, eternacards.co.uk, naturespeaksprints.com,
+rungoodlife.com, primeprotector.at, joshscards.com, gbtoys.com.au, postcardstore.in,
+store.sho.com, deathwishcoffee.com, resilia.shop, smooche.com, helloklean.com,
+blenderseyewear.com, fieldluft.de, cozyearth.com, schutz-shoes.com,
+miloustyle.myshopify.com, dubgum.com, 1md.org, 308industries.com, 310mood.com,
+360spb.com, 361europe.com, 3dogpetsupply.com, 3pawspetproducts.com,
+3rdbirdcollective.com, 404placevendome.com, 42birds.com, 42lolita.com,
+4boats.co.uk, 911wallet.com, 945industries.com, a-esque.com, a-martinez.com,
+a-maz.com, a1decoy.co.uk, a1swag.com, a2z4kids.co.uk, a7xworld.com,
+aaappliancecenter.com, aabn.io, aaminisplits.com, aapistons.com,
+abyss-headphones.com, acaciasf.com, academiabutic.com, academicallygifted.co.uk,
+academyfits.com, acasom.com, accessory.pet, accesspossibilities.com, accura.ie,
+accurafil.com, accurateagdrones.com, acefixings.com, acevacuums.com, achhaemart.com
 """
-SHOPIFY_DOMAINS = [d.strip() for d in SHOPIFY_DOMAINS.replace("\n", " ").split(",")
-                   if d.strip()]
+SHOPIFY_DOMAINS = [d.strip() for d in SHOPIFY_DOMAINS.replace("\n", " ").split(",") if d.strip()]
 
 # =========================================================
 #  AUTH
@@ -219,7 +339,7 @@ def banner():
     w = BOX_W
     print(CYAN + "═" * w); print(art, end=""); print(CYAN + "═" * w)
     print(WHITE + "kramyer  |  Raiii Kramyer")
-    print(DIM + "api · shopify-browser · auto-address · proxy")
+    print(DIM + f"api · shopify-browser · auto-address · proxy  v{APP_VERSION}")
     print(CYAN + "═" * w); print()
 
 # =========================================================
@@ -475,39 +595,101 @@ def lookup_bin(bin_number, pool=None):
 def extract_bin(cc): return cc.split("|")[0][:6]
 
 # =========================================================
-#  SHOPIFY VARIANT + CART
+#  SHOPIFY VARIANT FETCH (layered)
 # =========================================================
 _VARIANT_CACHE = {}; _VARIANT_LOCK = threading.Lock()
 
+def _extract_handles(html):
+    return list(set(re.findall(r'/products/([a-zA-Z0-9_\-]+)', html)))
+
 def fetch_variant(domain, pool=None):
+    """Layered: sitemap -> homepage -> /collections/all -> /products/{handle}.js"""
     with _VARIANT_LOCK:
         if domain in _VARIANT_CACHE: return _VARIANT_CACHE[domain]
-    proxy = pool.next() if pool else None; result = None
-    try:
-        r = requests.get(f"https://{domain}/products.json?limit=50",
-                         headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/137.0.0.0 Safari/537.36"},
-                         timeout=15, proxies=proxy_dict(proxy))
-        if r.status_code == 429: result = {"error": "429"}
-        elif r.status_code == 404: result = {"error": "404"}
-        elif r.status_code != 200: result = {"error": f"http {r.status_code}"}
-        else:
-            products = r.json().get("products") or []
-            if not products: result = {"error": "no products"}
-            else:
-                variants = []
-                for p in random.sample(products, min(10, len(products))):
-                    for v in p.get("variants", []):
-                        if v.get("available"):
-                            variants.append({"title": p.get("title", "")[:60], "variant_id": v["id"], "price": v.get("price", "0")}); break
-                result = {"variants": variants} if variants else {"error": "no available"}
-    except requests.Timeout: result = {"error": "timeout"}
-    except Exception as e: result = {"error": str(e)[:60]}
-    with _VARIANT_LOCK:
-        if "variants" in result: _VARIANT_CACHE[domain] = result
+    proxy = pool.next() if pool else None; px = proxy_dict(proxy)
+    ua = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/137.0.0.0 Safari/537.36",
+          "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          "Accept-Language": "en-US,en;q=0.9"}
+    def _get(url):
+        try: return requests.get(url, headers=ua, timeout=15, proxies=px)
+        except Exception: return None
+    handles = []
+    for sm in ("/sitemap_products_1.xml", "/sitemap_products_2.xml", "/sitemap.xml"):
+        r = _get(f"https://{domain}{sm}")
+        if not r or r.status_code != 200: continue
+        if "<sitemap>" in r.text:
+            m = re.search(r"<loc>([^<]*sitemap_products[^<]*)</loc>", r.text)
+            if m:
+                r = _get(m.group(1))
+                if not r: continue
+        urls = re.findall(r"<loc>(https://[^<]+/products/[^<]+)</loc>", r.text)
+        for u in urls:
+            h = u.rstrip("/").split("/products/")[-1].split("?")[0]
+            h = re.sub(r"\.(xml|json|html)$", "", h)
+            if h and h not in handles: handles.append(h)
+        if handles: break
+    if not handles:
+        r = _get(f"https://{domain}/")
+        if r and r.status_code == 200: handles = _extract_handles(r.text)
+    if not handles:
+        r = _get(f"https://{domain}/collections/all")
+        if r and r.status_code == 200: handles = _extract_handles(r.text)
+    if not handles:
+        result = {"error": "no handles"}
+        with _VARIANT_LOCK: _VARIANT_CACHE[domain] = result
+        return result
+    random.shuffle(handles); variants = []
+    for h in handles[:10]:
+        try:
+            r = requests.get(f"https://{domain}/products/{h}.js", headers=ua, timeout=12, proxies=px)
+            if not r or r.status_code != 200: continue
+            data = r.json()
+            for v in data.get("variants", []):
+                if v.get("available"):
+                    variants.append({"title": data.get("title", "")[:60], "variant_id": v["id"],
+                                     "price": str(v.get("price", 0) / 100)})
+                    break
+            if len(variants) >= 5: break
+        except Exception: continue
+    result = {"variants": variants} if variants else {"error": "no available variants"}
+    with _VARIANT_LOCK: _VARIANT_CACHE[domain] = result
     return result
 
 def build_checkout_url(domain, variant_id):
     return f"https://{domain}/cart/{variant_id}:1?skip_shop_pay=true&auto_redirect=false"
+
+# =========================================================
+#  BROWSER DETECTION
+# =========================================================
+IS_TERMUX = "com.termux" in os.environ.get("PREFIX", "") or os.path.isdir("/data/data/com.termux")
+
+def find_chromium():
+    env_path = os.environ.get("CHROMIUM_PATH")
+    if env_path and os.path.isfile(env_path): return env_path
+    for c in ["/data/data/com.termux/files/usr/lib/chromium/chrome",
+              "/data/data/com.termux/files/usr/bin/chromium-browser",
+              "/data/data/com.termux/files/usr/bin/chromium",
+              "/usr/bin/chromium-browser", "/usr/bin/chromium",
+              "/usr/bin/google-chrome", "/usr/bin/google-chrome-stable"]:
+        if os.path.isfile(c): return c
+    for name in ("chromium-browser", "chromium", "google-chrome"):
+        try:
+            path = subprocess.check_output(["which", name], stderr=subprocess.DEVNULL).decode().strip()
+            if path: return path
+        except Exception: pass
+    return None
+
+CHROMIUM_PATH = find_chromium()
+_BROWSER_ENGINE = None
+
+def detect_browser_engine():
+    global _BROWSER_ENGINE
+    if _BROWSER_ENGINE is not None: return _BROWSER_ENGINE
+    try: import playwright; _BROWSER_ENGINE = "playwright"; return _BROWSER_ENGINE
+    except ImportError: pass
+    try: import cdriv; _BROWSER_ENGINE = "cdriv"; return _BROWSER_ENGINE
+    except ImportError: pass
+    return None
 
 # =========================================================
 #  PLAYWRIGHT DRIVER
@@ -534,7 +716,6 @@ async def _playwright_checkout(checkout_url, cc, address, proxy_url=None, headle
                       "viewport": {"width": 412, "height": 915}, "device_scale_factor": 2.625,
                       "is_mobile": True, "has_touch": True, "locale": "en-US", "timezone_id": "America/New_York"}
         if proxy_url:
-            from urllib.parse import urlparse
             pp = urlparse(proxy_url); proxy_cfg = {"server": f"{pp.scheme}://{pp.hostname}:{pp.port}"}
             if pp.username: proxy_cfg["username"] = pp.username; proxy_cfg["password"] = pp.password
             ctx_kwargs["proxy"] = proxy_cfg
@@ -785,7 +966,7 @@ def run_single():
         if not CC_RE.match(cc): print("  " + RED + "bad format — card|mm|yy|cvv"); continue
         with Spinner("api"): api_res = api_check(cc, pool=pool)
         with Spinner("bin"): bin_res = lookup_bin(extract_bin(cc), pool=pool)
-        render_block(cc, api_res, bin_res)
+        render_compact(cc, api_res, bin_res); print()
         if input("  " + YELLOW + "another? (y/n) ▸ " + R).strip().lower() != "y": break
 
 def run_bulk():
@@ -897,39 +1078,6 @@ def run_shopify_browser():
                     f"  Charged file  : {DIM}{store_out.charged_path}{R}"], width=70)
 
 # =========================================================
-#  BROWSER DETECTION
-# =========================================================
-IS_TERMUX = "com.termux" in os.environ.get("PREFIX", "") or os.path.isdir("/data/data/com.termux")
-
-def find_chromium():
-    env_path = os.environ.get("CHROMIUM_PATH")
-    if env_path and os.path.isfile(env_path): return env_path
-    for c in ["/data/data/com.termux/files/usr/lib/chromium/chrome",
-              "/data/data/com.termux/files/usr/bin/chromium-browser",
-              "/data/data/com.termux/files/usr/bin/chromium",
-              "/usr/bin/chromium-browser", "/usr/bin/chromium",
-              "/usr/bin/google-chrome", "/usr/bin/google-chrome-stable"]:
-        if os.path.isfile(c): return c
-    for name in ("chromium-browser", "chromium", "google-chrome"):
-        try:
-            path = subprocess.check_output(["which", name], stderr=subprocess.DEVNULL).decode().strip()
-            if path: return path
-        except Exception: pass
-    return None
-
-CHROMIUM_PATH = find_chromium()
-_BROWSER_ENGINE = None
-
-def detect_browser_engine():
-    global _BROWSER_ENGINE
-    if _BROWSER_ENGINE is not None: return _BROWSER_ENGINE
-    try: import playwright; _BROWSER_ENGINE = "playwright"; return _BROWSER_ENGINE
-    except ImportError: pass
-    try: import cdriv; _BROWSER_ENGINE = "cdriv"; return _BROWSER_ENGINE
-    except ImportError: pass
-    return None
-
-# =========================================================
 #  PROXY MENU
 # =========================================================
 def proxy_menu():
@@ -1011,7 +1159,8 @@ def settings_menu():
                f"  {WHITE}[4]{R}  Headless           {DIM}{CFG.get('headless', True)}{R}",
                f"  {WHITE}[5]{R}  Timeout (ms)       {DIM}{CFG.get('timeout_ms', 45000)}{R}",
                f"  {WHITE}[6]{R}  Browser engine     {DIM}{engine}{R}",
-               f"  {WHITE}[7]{R}  Re-detect engine", f"  {WHITE}[0]{R}  Back"], width=66)
+               f"  {WHITE}[7]{R}  Re-detect engine", f"  {WHITE}[8]{R}  Check for updates",
+               f"  {WHITE}[0]{R}  Back"], width=66)
         c = input("  " + YELLOW + "select ▸ " + R).strip()
         if c == "1":
             p = choose_dir("storage folder")
@@ -1036,6 +1185,19 @@ def settings_menu():
             print(f"  {GREEN}detected: {detected or 'none'}{R}"); time.sleep(1)
         elif c == "7":
             _BROWSER_ENGINE = None; print(f"  {GREEN}re-detecting...{R}"); time.sleep(0.8)
+        elif c == "8":
+            remote = _remote_version()
+            if not remote:
+                print("  " + RED + "could not reach GitHub" + R); time.sleep(1.2); continue
+            try:
+                newer = Version(remote) > Version(APP_VERSION)
+            except InvalidVersion:
+                newer = remote != APP_VERSION
+            if newer:
+                yn = input("  " + YELLOW + f"install saeka=={remote}? (y/n) ▸ " + R).strip().lower()
+                if yn == "y" and do_update(remote): relaunch()
+            else:
+                print("  " + GREEN + f"up to date (v{APP_VERSION})" + R); time.sleep(1.2)
         elif c in ("0", ""): return
 
 # =========================================================
@@ -1046,12 +1208,14 @@ def menu():
     boxed([f"  {WHITE}[1]{R}  Single API check", f"  {WHITE}[2]{R}  Bulk API check",
            f"  {WHITE}[3]{R}  {GREEN}Shopify browser checkout{R}  {DIM}({engine}){R}",
            f"  {WHITE}[4]{R}  Proxy configuration", f"  {WHITE}[5]{R}  Settings",
-           f"  {WHITE}[0]{R}  Exit"], width=66)
+           f"  {WHITE}[6]{R}  Check for updates", f"  {WHITE}[0]{R}  Exit"], width=66)
     print(); return input("  " + YELLOW + "select ▸ " + R).strip()
 
 def main():
     if not auth_gate(): return
-    banner(); type_out("  initializing...", delay=0.02, color=DIM)
+    auto_update_gate()
+    banner()
+    type_out("  initializing...", delay=0.02, color=DIM)
     engine = detect_browser_engine()
     type_out(f"  browser engine: {engine or 'none'}", delay=0.015, color=DIM if not engine else GREEN)
     type_out(f"  chromium: {CHROMIUM_PATH or 'not found'}", delay=0.015, color=DIM if not CHROMIUM_PATH else GREEN)
@@ -1063,6 +1227,20 @@ def main():
         elif c == "3": banner(); run_shopify_browser(); input("\n  " + DIM + "enter" + R)
         elif c == "4": proxy_menu()
         elif c == "5": settings_menu()
+        elif c == "6":
+            remote = _remote_version()
+            if not remote:
+                print("  " + RED + "could not reach GitHub" + R); time.sleep(1.2)
+            else:
+                try:
+                    newer = Version(remote) > Version(APP_VERSION)
+                except InvalidVersion:
+                    newer = remote != APP_VERSION
+                if newer:
+                    yn = input("  " + YELLOW + f"install saeka=={remote}? (y/n) ▸ " + R).strip().lower()
+                    if yn == "y" and do_update(remote): relaunch()
+                else:
+                    print("  " + GREEN + f"up to date (v{APP_VERSION})" + R); time.sleep(1.2)
         elif c in ("0", "q", "exit"):
             print(); type_out("  goodbye...", delay=0.03, color=RED); return
         else: print("  " + RED + "invalid" + R); time.sleep(0.4)
