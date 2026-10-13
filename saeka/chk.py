@@ -1,14 +1,3 @@
-# language: Python 3, file: cc_chk.py
-# deps: requests, colorama, cfonts, playwright
-#
-# TERMUX SETUP:
-#   pkg install x11-repo && pkg update
-#   pkg install python nodejs chromium termux-api
-#   pip install termux-playwright
-#   python -m termux_playwright install
-#   termux-wake-lock
-#   export CHROMIUM_PATH=/data/data/com.termux/files/usr/lib/chromium/chrome
-
 import os, re, sys, json, time, base64, hashlib, getpass, random, asyncio, threading, itertools, subprocess
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
