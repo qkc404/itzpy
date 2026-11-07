@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="saeka",
-    version="20.0",
+    version="25.0",
     packages=find_packages(),
     include_package_data=True,
     package_data={
